@@ -15,9 +15,11 @@
 
 set -e  # 遇到错误立即退出
 
-# ---------- 默认配置 ----------
+# ---------- 默认配置 (可在此修改) ----------
+DEFAULT_REMOTE="rsnum"
 DEFAULT_BRANCH="master"
-# -----------------------------
+DEFAULT_REPO_URL="https://gitee.com/love_develop/rsnum.git"
+# ------------------------------------------
 
 usage() {
     echo "用法: $0 <命令> [参数...]"
@@ -30,6 +32,11 @@ usage() {
     echo "  pull   <远程名称> [分支名]     从指定远程仓库拉取"
     echo "  remove <远程名称>              删除指定远程仓库"
     echo "  --help                         显示此帮助信息"
+    echo ""
+    echo "默认配置:"
+    echo "  默认远程: $DEFAULT_REMOTE"
+    echo "  默认分支: $DEFAULT_BRANCH"
+    echo "  默认仓库: $DEFAULT_REPO_URL"
     echo ""
     echo "示例:"
     echo "  $0 add gitee https://gitee.com/love_develop/rsnum.git"
@@ -63,13 +70,15 @@ case "$1" in
         ;;
         
     add)
-        if [ -z "$2" ] || [ -z "$3" ]; then
-            echo "用法: $0 add <远程名称> <仓库URL>"
+        REMOTE_NAME="${2:-$DEFAULT_REMOTE}"
+        REPO_URL="${3:-$DEFAULT_REPO_URL}"
+        
+        if [ -z "$REPO_URL" ]; then
+            echo "用法: $0 add [<远程名称>] [<仓库URL>]"
             echo "示例: $0 add gitee https://gitee.com/love_develop/rsnum.git"
+            echo "默认: $0 add -> 添加 $DEFAULT_REMOTE $DEFAULT_REPO_URL"
             exit 1
         fi
-        REMOTE_NAME="$2"
-        REPO_URL="$3"
         
         if git remote get-url "$REMOTE_NAME" &> /dev/null; then
             echo "远程仓库 $REMOTE_NAME 已存在，更新 URL..."
@@ -91,18 +100,16 @@ case "$1" in
         echo "当前分支: $(git branch --show-current)"
         CURRENT_UPSTREAM=$(git rev-parse --abbrev-ref HEAD@{upstream} 2>/dev/null || echo "未设置")
         echo "当前上游: $CURRENT_UPSTREAM"
+        echo ""
+        echo "默认配置:"
+        echo "  默认远程: $DEFAULT_REMOTE"
+        echo "  默认分支: $DEFAULT_BRANCH"
         ;;
         
     use)
-        if [ -z "$2" ]; then
-            echo "用法: $0 use <远程名称> [分支名]"
-            echo "示例: $0 use gitee master"
-            exit 1
-        fi
-        REMOTE_NAME="$2"
+        REMOTE_NAME="${2:-$DEFAULT_REMOTE}"
         BRANCH="${3:-$DEFAULT_BRANCH}"
         
-        # 检查远程是否存在
         if ! git remote get-url "$REMOTE_NAME" &> /dev/null; then
             echo "错误: 远程仓库 $REMOTE_NAME 不存在"
             echo "请先添加: $0 add $REMOTE_NAME <仓库URL>"
@@ -116,7 +123,6 @@ case "$1" in
         echo "目标分支: $BRANCH"
         echo "=========================================="
         
-        # 确保本地分支存在
         CURRENT_BRANCH=$(git branch --show-current)
         if [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
             echo "切换到分支 $BRANCH..."
@@ -129,7 +135,6 @@ case "$1" in
             fi
         fi
         
-        # 设置上游并推送
         echo ""
         echo "设置上游并推送..."
         git push -u "$REMOTE_NAME" "$BRANCH"
@@ -141,12 +146,7 @@ case "$1" in
         ;;
         
     push)
-        if [ -z "$2" ]; then
-            echo "用法: $0 push <远程名称> [分支名]"
-            echo "示例: $0 push gitee master"
-            exit 1
-        fi
-        REMOTE_NAME="$2"
+        REMOTE_NAME="${2:-$DEFAULT_REMOTE}"
         BRANCH="${3:-$(git branch --show-current)}"
         
         if ! git remote get-url "$REMOTE_NAME" &> /dev/null; then
@@ -160,12 +160,7 @@ case "$1" in
         ;;
         
     pull)
-        if [ -z "$2" ]; then
-            echo "用法: $0 pull <远程名称> [分支名]"
-            echo "示例: $0 pull gitee master"
-            exit 1
-        fi
-        REMOTE_NAME="$2"
+        REMOTE_NAME="${2:-$DEFAULT_REMOTE}"
         BRANCH="${3:-$(git branch --show-current)}"
         
         if ! git remote get-url "$REMOTE_NAME" &> /dev/null; then
@@ -179,12 +174,7 @@ case "$1" in
         ;;
         
     remove)
-        if [ -z "$2" ]; then
-            echo "用法: $0 remove <远程名称>"
-            echo "示例: $0 remove old_repo"
-            exit 1
-        fi
-        REMOTE_NAME="$2"
+        REMOTE_NAME="${2:-$DEFAULT_REMOTE}"
         
         if ! git remote get-url "$REMOTE_NAME" &> /dev/null; then
             echo "错误: 远程仓库 $REMOTE_NAME 不存在"
