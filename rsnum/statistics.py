@@ -30,7 +30,7 @@ def mean(a, axis=None, dtype=None, out=None, keepdims=False, where=True):
 
 def std(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, where=True):
     """计算数组元素的标准差。"""
-    return _wrap(_core.std_dev(_ensure_raw(a), axis))
+    return _wrap(_core.std(_ensure_raw(a), axis))
 
 
 def var(a, axis=None, dtype=None, out=None, ddof=0, keepdims=False, where=True):
