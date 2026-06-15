@@ -78,38 +78,16 @@ class ndarray:
 
     def __getitem__(self, key):
         if isinstance(key, tuple):
-            import builtins
-            strides = [1]
-            for s in reversed(self.shape[1:]):
-                strides.insert(0, strides[0] * s)
-            start_indices = []
-            end_indices = []
-            step_indices = []
+            ranges = []
             for i, k in enumerate(key):
                 if isinstance(k, slice):
-                    start_indices.append(k.start or 0)
-                    end_indices.append(k.stop or self.shape[i])
-                    step_indices.append(k.step or 1)
+                    start = k.start or 0
+                    end = k.stop if k.stop is not None else self.shape[i]
+                    step = k.step or 1
+                    ranges.append((start, end, step))
                 else:
-                    start_indices.append(k)
-                    end_indices.append(k + 1)
-                    step_indices.append(1)
-            new_shape = []
-            for i in range(len(key)):
-                size = (end_indices[i] - start_indices[i] + step_indices[i] - 1) // step_indices[i]
-                new_shape.append(size)
-            flat_data = self.ravel().tolist()
-            result_data = []
-
-            def extract(idx, dim):
-                if dim == len(key):
-                    flat_idx = builtins.sum(i * s for i, s in zip(idx, strides))
-                    result_data.append(flat_data[flat_idx])
-                else:
-                    for i in range(start_indices[dim], end_indices[dim], step_indices[dim]):
-                        extract(idx + [i], dim + 1)
-            extract([], 0)
-            return ndarray(result_data).reshape(tuple(new_shape))
+                    ranges.append((int(k), int(k) + 1, 1))
+            return _wrap_result(_core.tuple_getitem(self._array, ranges))
         else:
             result = self._array[key]
             return _wrap_result(result)

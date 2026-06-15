@@ -80,12 +80,12 @@ def nanpercentile(a, q, axis=None, out=None, keepdims=False, interpolation='line
 
 def argmax(a, axis=None, out=None, keepdims=False):
     """返回数组沿指定轴的最大值索引。"""
-    return _core.argmax(_ensure_raw(a))
+    return _wrap(_core.argmax_axis(_ensure_raw(a), axis))
 
 
 def argmin(a, axis=None, out=None, keepdims=False):
     """返回数组沿指定轴的最小值索引。"""
-    return _core.argmin(_ensure_raw(a))
+    return _wrap(_core.argmin_axis(_ensure_raw(a), axis))
 
 
 def argsort(a, axis=-1, kind=None, order=None):

@@ -31,7 +31,6 @@ class Poly:
         """计算多项式在 x 处的值。"""
         nd = _nd()
         x_arr = nd(x) if not hasattr(x, '_array') else x
-
         return _wrap(_core.polyval_rs(self._coef_raw, x_arr._array))
 
     def __repr__(self):
@@ -53,39 +52,18 @@ class Poly:
 
     def __add__(self, other):
         if isinstance(other, Poly):
-            n = max(len(self.coef), len(other.coef))
-            new_coef = [0.0] * n
-            for i in range(len(self.coef)):
-                new_coef[n - len(self.coef) + i] = self.coef[i]
-            for i in range(len(other.coef)):
-                new_coef[n - len(other.coef) + i] += other.coef[i]
-            return Poly(new_coef)
-        new_coef = self.coef[:]
-        new_coef[-1] += other
-        return Poly(new_coef)
+            return Poly(_wrap(_core.polyadd(self._coef_raw, other._coef_raw)))
+        return Poly(_wrap(_core.polyadd(self._coef_raw, _core.ndarray([float(other)]))))
 
     def __sub__(self, other):
         if isinstance(other, Poly):
-            n = max(len(self.coef), len(other.coef))
-            new_coef = [0.0] * n
-            for i in range(len(self.coef)):
-                new_coef[n - len(self.coef) + i] = self.coef[i]
-            for i in range(len(other.coef)):
-                new_coef[n - len(other.coef) + i] -= other.coef[i]
-            return Poly(new_coef)
-        new_coef = self.coef[:]
-        new_coef[-1] -= other
-        return Poly(new_coef)
+            return Poly(_wrap(_core.polysub(self._coef_raw, other._coef_raw)))
+        return Poly(_wrap(_core.polysub(self._coef_raw, _core.ndarray([float(other)]))))
 
     def __mul__(self, other):
         if isinstance(other, Poly):
-            n = len(self.coef) + len(other.coef) - 1
-            new_coef = [0.0] * n
-            for i, ci in enumerate(self.coef):
-                for j, cj in enumerate(other.coef):
-                    new_coef[i + j] += ci * cj
-            return Poly(new_coef)
-        return Poly([c * other for c in self.coef])
+            return Poly(_wrap(_core.polymul(self._coef_raw, other._coef_raw)))
+        return Poly(_wrap(_core.polymul(self._coef_raw, _core.ndarray([float(other)]))))
 
     @property
     def degree(self):

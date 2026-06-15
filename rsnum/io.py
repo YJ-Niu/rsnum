@@ -20,8 +20,7 @@ def _wrap(result):
 
 def save(file, arr):
     """将数组保存为二进制文件 (.npy)。"""
-    raw = _ensure_raw(arr)
-    _core.save_npy(file, raw)
+    _core.save_npy(file, _ensure_raw(arr))
 
 
 def load(file, mmap_mode=None, allow_pickle=False, fix_imports=True, encoding='ASCII'):
@@ -32,8 +31,7 @@ def load(file, mmap_mode=None, allow_pickle=False, fix_imports=True, encoding='A
 def savetxt(fname, X, fmt='%.18e', delimiter=' ', newline='\n', header='',
             footer='', comments='# ', encoding=None):
     """将数组保存为文本文件。"""
-    raw = _ensure_raw(X)
-    _core.save_text(fname, raw, fmt, delimiter)
+    _core.save_text(fname, _ensure_raw(X), fmt, delimiter)
 
 
 def loadtxt(fname, dtype=float, comments='#', delimiter=None, converters=None,
@@ -47,35 +45,21 @@ def loadtxt(fname, dtype=float, comments='#', delimiter=None, converters=None,
 
 def savez(file, *args, **kwds):
     """将多个数组保存为未压缩的 .npz 文件。"""
-    import zipfile
-    with zipfile.ZipFile(file, 'w') as zf:
-        named = {}
-        for i, arg in enumerate(args):
-            name = 'arr_%d' % i
-            named[name] = arg
-        named.update(kwds)
-        for name, arr in named.items():
-            if not name.endswith('.npy'):
-                fname = name + '.npy'
-            else:
-                fname = name
-            path = '/tmp/_rsnum_' + fname
-            save(path, arr)
-            zf.write(path, fname)
+    arrays = []
+    names = []
+    for i, arg in enumerate(args):
+        arrays.append(_ensure_raw(arg))
+        names.append('arr_%d' % i)
+    for name, arr in kwds.items():
+        arrays.append(_ensure_raw(arr))
+        names.append(name)
+    _core.savez_npz(file, arrays, names)
 
 
 def load_npz(file):
     """从 .npz 文件加载数组（返回 dict）。"""
-    import zipfile
-    zf = zipfile.ZipFile(file, 'r')
+    pairs = _core.load_npz(file)
     result = {}
-    for name in zf.namelist():
-        if name.endswith('.npy'):
-            key = name[:-4]
-            with zf.open(name) as f:
-                content = f.read()
-                path = '/tmp/_rsnum_load_' + name
-                with open(path, 'wb') as tmp:
-                    tmp.write(content)
-                result[key] = load(path)
+    for key, raw in pairs:
+        result[key] = _wrap(raw)
     return result

@@ -299,21 +299,7 @@ class NdArrayMethods:
         返回:
             标量或 ndarray: 索引。
         """
-        if axis is None:
-            return arr._array.argmax()
-        arr_obj = ndarray(arr._array)
-        if axis < 0:
-            axis += arr_obj.ndim
-        shape = list(arr_obj.shape)
-        if axis >= len(shape):
-            raise ValueError("axis out of bounds")
-        result_shape = shape[:axis] + shape[axis+1:]
-        if result_shape == []:
-            return arr_obj.argmax()
-        result = []
-        for i in range(arr_obj.size):
-            result.append(float(i))
-        return _wrap_result(_core.ndarray(result))
+        return _wrap_result(_core.argmax_axis(arr._array, axis))
     
     @staticmethod
     def argmin(arr, axis=None):
@@ -326,21 +312,7 @@ class NdArrayMethods:
         返回:
             标量或 ndarray: 索引。
         """
-        if axis is None:
-            return arr._array.argmin()
-        arr_obj = ndarray(arr._array)
-        if axis < 0:
-            axis += arr_obj.ndim
-        shape = list(arr_obj.shape)
-        if axis >= len(shape):
-            raise ValueError("axis out of bounds")
-        result_shape = shape[:axis] + shape[axis+1:]
-        if result_shape == []:
-            return arr_obj.argmin()
-        result = []
-        for i in range(arr_obj.size):
-            result.append(float(i))
-        return _wrap_result(_core.ndarray(result))
+        return _wrap_result(_core.argmin_axis(arr._array, axis))
     
     @staticmethod
     def argsort(arr, axis=-1):
