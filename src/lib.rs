@@ -3200,7 +3200,6 @@ fn tuple_getitem(a: &NdArray, ranges: &Bound<'_, PyAny>) -> PyResult<NdArray> {
 fn savez_npz(filename: &str, arrays: &Bound<'_, PyAny>, names: &Bound<'_, PyAny>) -> PyResult<()> {
     use std::fs::File;
     use std::io::Write;
-    use std::path::Path;
 
     let arr_list = arrays.cast::<PyList>()?;
     let name_list = names.cast::<PyList>()?;
@@ -3211,10 +3210,10 @@ fn savez_npz(filename: &str, arrays: &Bound<'_, PyAny>, names: &Bound<'_, PyAny>
     let file = File::create(filename)
         .map_err(|e| PyValueError::new_err(format!("Failed to create file: {}", e)))?;
     let mut zip = zip::ZipWriter::new(file);
-    let options = zip::write::FileOptions::default()
+    let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default()
         .compression_method(zip::CompressionMethod::Stored);
 
-    for (i, (item, name_item)) in arr_list.iter().zip(name_list.iter()).enumerate() {
+    for (_i, (item, name_item)) in arr_list.iter().zip(name_list.iter()).enumerate() {
         let nd = item.extract::<NdArray>()?;
         let name_str = name_item.extract::<String>()?;
         let entry_name = if name_str.ends_with(".npy") {
@@ -3248,8 +3247,6 @@ fn savez_npz(filename: &str, arrays: &Bound<'_, PyAny>, names: &Bound<'_, PyAny>
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         zip.write_all(&buf)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        let _ = i;
-        let _ = Path::new(".");
     }
 
     zip.finish().map_err(|e| PyValueError::new_err(e.to_string()))?;
