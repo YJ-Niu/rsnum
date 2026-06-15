@@ -1,10 +1,9 @@
 """rsnum.linalg - Linear algebra module."""
 
 import rsnum._core as _core
-
+from ..__init__ import ndarray, _wrap_result
 
 def _ensure(x):
-    from ..__init__ import ndarray
     if isinstance(x, (list, tuple)):
         return _core.ndarray(x)
     elif isinstance(x, ndarray):
@@ -26,7 +25,6 @@ class linalg_module:
         返回:
             标量或 ndarray: 点积结果。
         """
-        from ..__init__ import ndarray
         a_arr = ndarray(a)
         b_arr = ndarray(b)
         a_data = a_arr.tolist()
@@ -69,7 +67,6 @@ class linalg_module:
     @staticmethod
     def inv(a):
         """计算矩阵的逆。"""
-        from ..__init__ import ndarray
         arr = ndarray(a)
         data = arr.tolist()
         n = len(data)
@@ -105,7 +102,6 @@ class linalg_module:
     @staticmethod
     def det(a):
         """计算矩阵的行列式。"""
-        from ..__init__ import ndarray
         arr = ndarray(a)
         data = arr.tolist()
         n = len(data)
@@ -140,8 +136,6 @@ class linalg_module:
     @staticmethod
     def norm(x, ord=None, axis=None):
         """计算矩阵或向量的范数。"""
-        from ..__init__ import ndarray
-        import math
         arr = ndarray(x)
         data = arr.tolist()
         
@@ -156,7 +150,7 @@ class linalg_module:
         flat = flatten(data)
         
         if ord is None or ord == 2:
-            return math.sqrt(sum(v * v for v in flat))
+            return sum(v * v for v in flat) ** 0.5
         elif ord == 1:
             return sum(abs(v) for v in flat)
         elif ord == float('inf'):
@@ -167,7 +161,6 @@ class linalg_module:
     @staticmethod
     def solve(a, b):
         """求解线性方程组。"""
-        from ..__init__ import ndarray
         a_arr = ndarray(a)
         b_arr = ndarray(b)
         a_data = a_arr.tolist()
@@ -227,7 +220,6 @@ class linalg_module:
     @staticmethod
     def cholesky(a):
         """计算 Cholesky 分解。"""
-        from ..__init__ import ndarray
         arr = ndarray(a)
         data = arr.tolist()
         n = len(data)
@@ -248,7 +240,6 @@ class linalg_module:
     @staticmethod
     def matrix_power(a, n):
         """计算矩阵的幂。"""
-        from ..__init__ import ndarray
         arr = ndarray(a)
         data = arr.tolist()
         
@@ -265,7 +256,6 @@ class linalg_module:
     @staticmethod
     def pinv(a):
         """计算矩阵的伪逆。"""
-        from ..__init__ import ndarray
         arr = ndarray(a)
         data = arr.tolist()
         
@@ -293,7 +283,6 @@ class linalg_module:
     @staticmethod
     def trace(a):
         """计算矩阵的迹。"""
-        from ..__init__ import ndarray
         arr = ndarray(a)
         data = arr.tolist()
         return sum(data[i][i] for i in range(len(data)))
@@ -301,7 +290,6 @@ class linalg_module:
     @staticmethod
     def diagonal(a):
         """返回矩阵的对角线元素。"""
-        from ..__init__ import ndarray
         arr = ndarray(a)
         data = arr.tolist()
         return ndarray([data[i][i] for i in range(len(data))])
@@ -319,5 +307,4 @@ class linalg_module:
     @staticmethod
     def solve_banded(lower, upper, ab, b):
         """求解带状线性方程组。"""
-        from ..__init__ import ndarray, _wrap_result
         return _wrap_result(_core.linalg.solve_banded(lower, upper, _ensure(ab), _ensure(b)))

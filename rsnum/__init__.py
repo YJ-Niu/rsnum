@@ -14,64 +14,40 @@ Examples:
 
 import rsnum._core as _core
 from rsnum._core import ndarray_iter as NdArrayIter
-
+# ========== 子模块导入和函数挂载 ==========
+# 这些导入放在 ndarray 类定义之后以避免循环导入
 from . import array_methods
-from . import array_ops
-from . import math_functions
-from . import statistics
+from . import math_functions as _math_functions_module
+from . import statistics as _statistics_module
+from . import array_ops as _array_ops_module
 
-
-def _ensure(x):
-    """Convert list/tuple to ndarray if needed."""
-    if isinstance(x, (list, tuple)):
-        return _core.ndarray(x)
-    elif isinstance(x, ndarray):
-        return x._array
-    elif hasattr(x, '__class__') and x.__class__.__name__ == 'ndarray':
-        return x
-    return x
-
-
-def _wrap_result(result):
-    """Wrap a raw ndarray result in our ndarray class."""
-    if hasattr(result, '__class__') and result.__class__.__name__ == 'ndarray':
-        return ndarray._wrap(result)
-    return result
+from .io import save, load, loadtxt, savetxt, savez, load_npz
+from .polynomial import Poly, polyval, polyfit, polyder, polyint, polyroots
+from .linalg import linalg_module as _linalg_module
+from .random import random_module as _random_module
 
 
 class ndarray:
     """
-    rsnum.ndarray - A multi-dimensional array object.
+    rsnum.ndarray - 多维数组对象。
 
-    rsnum.ndarray is a Rust-backed array type that provides NumPy-compatible
-    functionality with improved performance and memory efficiency.
+    这是一个 Rust 后端支持的数组类型，提供与 NumPy 兼容的功能。
 
-    Parameters:
-        data (array_like): Initial data for the array. Can be a list, tuple,
-            or any iterable.
+    参数:
+        data (array_like): 数组的初始数据，可以是列表、元组或可迭代对象。
 
-    Attributes:
-        shape: Tuple of array dimensions.
-        ndim: Number of dimensions.
-        size: Total number of elements.
-        dtype: Data type of the array elements.
-        itemsize: Size of each element in bytes.
-        nbytes: Total number of bytes.
-        T: Transpose of the array.
-        real: Real part of the array.
-        imag: Imaginary part of the array.
-
-    Examples:
-        >>> import rsnum as np
-        >>> a = np.ndarray([1, 2, 3])
-        >>> a.shape
-        (3,)
-        >>> a.ndim
-        1
-        >>> a.size
-        3
+    属性:
+        shape: 数组维度的元组。
+        ndim: 维度数量。
+        size: 元素总数。
+        dtype: 元素数据类型。
+        itemsize: 每个元素的字节大小。
+        nbytes: 总字节数。
+        T: 数组的转置。
+        real: 数组的实部。
+        imag: 数组的虚部。
     """
-    
+
     def __init__(self, data):
         if isinstance(data, ndarray):
             self._array = data._array
@@ -79,17 +55,17 @@ class ndarray:
             self._array = data
         else:
             self._array = _core.ndarray(data)
-    
+
     @staticmethod
     def _wrap(raw_array):
-        """Wrap a raw Rust ndarray in our Python class."""
+        """包装原始 Rust ndarray 到 Python 类。"""
         obj = ndarray.__new__(ndarray)
         obj._array = raw_array
         return obj
-    
+
     def __repr__(self):
         return repr(self._array)
-    
+
     def __len__(self):
         if self.ndim == 0:
             raise TypeError("len() of unsized object")
@@ -103,11 +79,9 @@ class ndarray:
     def __getitem__(self, key):
         if isinstance(key, tuple):
             import builtins
-            from .__init__ import ndarray
             strides = [1]
             for s in reversed(self.shape[1:]):
                 strides.insert(0, strides[0] * s)
-            
             start_indices = []
             end_indices = []
             step_indices = []
@@ -120,15 +94,13 @@ class ndarray:
                     start_indices.append(k)
                     end_indices.append(k + 1)
                     step_indices.append(1)
-            
             new_shape = []
             for i in range(len(key)):
                 size = (end_indices[i] - start_indices[i] + step_indices[i] - 1) // step_indices[i]
                 new_shape.append(size)
-            
             flat_data = self.ravel().tolist()
             result_data = []
-            
+
             def extract(idx, dim):
                 if dim == len(key):
                     flat_idx = builtins.sum(i * s for i, s in zip(idx, strides))
@@ -136,25 +108,20 @@ class ndarray:
                 else:
                     for i in range(start_indices[dim], end_indices[dim], step_indices[dim]):
                         extract(idx + [i], dim + 1)
-            
             extract([], 0)
-            
             return ndarray(result_data).reshape(tuple(new_shape))
         else:
             result = self._array[key]
             return _wrap_result(result)
-    
+
     def __setitem__(self, key, value):
         if isinstance(key, tuple):
             import builtins
-            from .__init__ import ndarray
             val = ndarray(value)
             flat_val = val.ravel().tolist()
-            
             strides = [1]
             for s in reversed(self.shape[1:]):
                 strides.insert(0, strides[0] * s)
-            
             flat_key = []
             indices = []
             for i, k in enumerate(key):
@@ -162,7 +129,7 @@ class ndarray:
                     indices.append(range(k.start or 0, k.stop or self.shape[i], k.step or 1))
                 else:
                     indices.append([k])
-            
+
             def assign(idx, dim):
                 if dim == len(key):
                     flat_idx = builtins.sum(i * s for i, s in zip(idx, strides))
@@ -170,411 +137,458 @@ class ndarray:
                 else:
                     for i in indices[dim]:
                         assign(idx + [i], dim + 1)
-            
             assign([], 0)
-            
             flat_data = self.ravel().tolist()
             for i, idx in enumerate(flat_key):
                 flat_data[idx] = flat_val[i % len(flat_val)]
-            
             new_arr = ndarray(flat_data).reshape(self.shape)
             self._array = new_arr._array
         else:
             self._array[key] = value
-    
+
     def __add__(self, other):
         if isinstance(other, ndarray):
             return _wrap_result(self._array + other._array)
         return _wrap_result(self._array + other)
-    
+
     def __radd__(self, other):
         return _wrap_result(other + self._array)
-    
+
     def __sub__(self, other):
         if isinstance(other, ndarray):
             return _wrap_result(self._array - other._array)
         return _wrap_result(self._array - other)
-    
+
     def __rsub__(self, other):
         return _wrap_result(other - self._array)
-    
+
     def __mul__(self, other):
         if isinstance(other, ndarray):
             return _wrap_result(self._array * other._array)
         return _wrap_result(self._array * other)
-    
+
     def __rmul__(self, other):
         return _wrap_result(other * self._array)
-    
+
     def __truediv__(self, other):
         if isinstance(other, ndarray):
             return _wrap_result(self._array / other._array)
         return _wrap_result(self._array / other)
-    
+
     def __rtruediv__(self, other):
         return _wrap_result(other / self._array)
-    
+
     def __matmul__(self, other):
         if isinstance(other, ndarray):
             return _wrap_result(_core.matmul(self._array, other._array))
         return _wrap_result(_core.matmul(self._array, other))
-    
+
     def __pow__(self, other):
         if isinstance(other, ndarray):
-            return _wrap_result(_core.pow(self._array, other._array))
-        return _wrap_result(_core.pow(self._array, other))
-    
+            return _wrap_result(_core.power(self._array, other._array))
+        return _wrap_result(_core.power(self._array, _core.ndarray([other])))
+
     def __eq__(self, other):
         if isinstance(other, ndarray):
             return _wrap_result(self._array.__eq__(other._array))
         return _wrap_result(self._array.__eq__(other))
-    
+
     def __ne__(self, other):
         if isinstance(other, ndarray):
             return _wrap_result(self._array.__ne__(other._array))
         return _wrap_result(self._array.__ne__(other))
-    
+
     def __lt__(self, other):
         if isinstance(other, ndarray):
             return _wrap_result(self._array.__lt__(other._array))
         return _wrap_result(self._array.__lt__(other))
-    
+
     def __le__(self, other):
         if isinstance(other, ndarray):
             return _wrap_result(self._array.__le__(other._array))
         return _wrap_result(self._array.__le__(other))
-    
+
     def __gt__(self, other):
         if isinstance(other, ndarray):
             return _wrap_result(self._array.__gt__(other._array))
         return _wrap_result(self._array.__gt__(other))
-    
+
     def __ge__(self, other):
         if isinstance(other, ndarray):
             return _wrap_result(self._array.__ge__(other._array))
         return _wrap_result(self._array.__ge__(other))
-    
+
     def __round__(self, ndigits=None):
         if ndigits is None:
             return _wrap_result(_core.round(self._array, 0))
         return _wrap_result(_core.round(self._array, ndigits))
-    
+
     # ========== 属性 ==========
-    
+
     @property
     def shape(self):
-        """Tuple of array dimensions."""
+        """返回数组维度的元组。"""
         return self._array.shape
-    
+
     @property
     def ndim(self):
-        """Number of array dimensions."""
+        """返回数组维度数量。"""
         return self._array.ndim
-    
+
     @property
     def size(self):
-        """Total number of elements."""
+        """返回元素总数。"""
         return self._array.size
-    
+
     @property
     def dtype(self):
-        """Data type of the array elements."""
+        """返回元素数据类型。"""
         return self._array.dtype
-    
+
     @property
     def itemsize(self):
-        """Size of each element in bytes."""
+        """每个元素的字节大小。"""
         return 8  # f64
-    
+
     @property
     def nbytes(self):
-        """Total number of bytes."""
+        """总字节数。"""
         return self.size * self.itemsize
-    
+
     @property
     def T(self):
-        """Transpose of the array."""
-        return self.transpose()
-    
+        """数组的转置。"""
+        return _ndarray_methods().transpose(self)
+
     @property
     def real(self):
-        """Real part of the array."""
+        """数组的实部。"""
         return self.copy()
-    
+
     @property
     def imag(self):
-        """Imaginary part of the array."""
+        """数组的虚部（全零）。"""
         return ndarray([0.0] * self.size).reshape(self.shape)
-    
+
     # ========== 对象方法 ==========
-    
+
     def astype(self, dtype):
-        """Convert the array to a specified type."""
-        return array_methods.NdArrayMethods.astype(self, dtype)
-    
+        """转换数组为指定类型。"""
+        return _ndarray_methods().astype(self, dtype)
+
     def reshape(self, *shape):
-        """Reshape the array."""
-        return array_methods.NdArrayMethods.reshape(self, *shape)
-    
+        """改变数组形状。"""
+        return _ndarray_methods().reshape(self, *shape)
+
     def resize(self, new_shape):
-        """Resize the array."""
-        array_methods.NdArrayMethods.resize(self, new_shape)
-    
+        """改变数组大小。"""
+        _ndarray_methods().resize(self, new_shape)
+
     def ravel(self, order='C'):
-        """Return a flattened array."""
-        return array_methods.NdArrayMethods.ravel(self, order)
-    
+        """展平数组。"""
+        return _ndarray_methods().ravel(self, order)
+
     def flatten(self, order='C'):
-        """Return a copy of the array collapsed into one dimension."""
-        return array_methods.NdArrayMethods.flatten(self, order)
-    
+        """返回数组的一维副本。"""
+        return _ndarray_methods().flatten(self, order)
+
     def copy(self):
-        """Return a copy of the array."""
+        """返回数组的副本。"""
         return _wrap_result(self._array.copy())
-    
+
     def transpose(self, *axes):
-        """Transpose the array."""
-        return array_methods.NdArrayMethods.transpose(self, *axes)
-    
+        """转置数组。"""
+        return _ndarray_methods().transpose(self, *axes)
+
     def swapaxes(self, axis1, axis2):
-        """Swap two axes."""
-        return array_methods.NdArrayMethods.swapaxes(self, axis1, axis2)
-    
+        """交换两个轴。"""
+        return _ndarray_methods().swapaxes(self, axis1, axis2)
+
     def squeeze(self, axis=None):
-        """Remove axes of length one."""
-        return array_methods.NdArrayMethods.squeeze(self, axis)
-    
+        """移除长度为1的轴。"""
+        return _ndarray_methods().squeeze(self, axis)
+
     def max(self, axis=None):
-        """Return the maximum value."""
-        return array_methods.NdArrayMethods.max(self, axis)
-    
+        """返回最大值。"""
+        return _ndarray_methods().max(self, axis)
+
     def min(self, axis=None):
-        """Return the minimum value."""
-        return array_methods.NdArrayMethods.min(self, axis)
-    
+        """返回最小值。"""
+        return _ndarray_methods().min(self, axis)
+
     def mean(self, axis=None):
-        """Compute the mean."""
-        return array_methods.NdArrayMethods.mean(self, axis)
-    
+        """计算平均值。"""
+        return _ndarray_methods().mean(self, axis)
+
     def std(self, axis=None):
-        """Compute the standard deviation."""
-        return array_methods.NdArrayMethods.std(self, axis)
-    
+        """计算标准差。"""
+        return _ndarray_methods().std(self, axis)
+
     def var(self, axis=None):
-        """Compute the variance."""
-        return array_methods.NdArrayMethods.var(self, axis)
-    
+        """计算方差。"""
+        return _ndarray_methods().var(self, axis)
+
     def sum(self, axis=None):
-        """Compute the sum."""
-        return array_methods.NdArrayMethods.sum(self, axis)
-    
+        """计算和。"""
+        return _ndarray_methods().sum(self, axis)
+
     def prod(self, axis=None):
-        """Compute the product."""
-        return array_methods.NdArrayMethods.prod(self, axis)
-    
+        """计算乘积。"""
+        return _ndarray_methods().prod(self, axis)
+
     def cumsum(self, axis=None):
-        """Compute the cumulative sum."""
-        return array_methods.NdArrayMethods.cumsum(self, axis)
-    
+        """计算累积和。"""
+        return _ndarray_methods().cumsum(self, axis)
+
     def cumprod(self, axis=None):
-        """Compute the cumulative product."""
-        return array_methods.NdArrayMethods.cumprod(self, axis)
-    
+        """计算累积乘积。"""
+        return _ndarray_methods().cumprod(self, axis)
+
     def argmax(self, axis=None):
-        """Return the indices of the maximum values."""
-        return array_methods.NdArrayMethods.argmax(self, axis)
-    
+        """返回最大值的索引。"""
+        return _ndarray_methods().argmax(self, axis)
+
     def argmin(self, axis=None):
-        """Return the indices of the minimum values."""
-        return array_methods.NdArrayMethods.argmin(self, axis)
-    
+        """返回最小值的索引。"""
+        return _ndarray_methods().argmin(self, axis)
+
     def argsort(self, axis=-1):
-        """Return the indices that would sort the array."""
-        return array_methods.NdArrayMethods.argsort(self, axis)
-    
+        """返回排序后的索引。"""
+        return _ndarray_methods().argsort(self, axis)
+
     def sort(self, axis=-1):
-        """Sort the array in place."""
-        array_methods.NdArrayMethods.sort(self, axis)
-    
+        """原地排序。"""
+        _ndarray_methods().sort(self, axis)
+
     def diagonal(self, offset=0, axis1=0, axis2=1):
-        """Return specified diagonals."""
-        return array_methods.NdArrayMethods.diagonal(self, offset, axis1, axis2)
-    
+        """返回对角线元素。"""
+        return _ndarray_methods().diagonal(self, offset, axis1, axis2)
+
     def trace(self, offset=0, axis1=0, axis2=1):
-        """Compute the trace."""
-        return array_methods.NdArrayMethods.trace(self, offset, axis1, axis2)
-    
+        """计算迹。"""
+        return _ndarray_methods().trace(self, offset, axis1, axis2)
+
     def fill(self, value):
-        """Fill the array with a scalar value."""
-        array_methods.NdArrayMethods.fill(self, value)
-    
+        """用值填充数组。"""
+        _ndarray_methods().fill(self, value)
+
     def item(self, *args):
-        """Get a single element."""
-        return array_methods.NdArrayMethods.item(self, *args)
-    
+        """获取单个元素。"""
+        return _ndarray_methods().item(self, *args)
+
     def tolist(self):
-        """Convert to a Python list."""
-        return array_methods.NdArrayMethods.tolist(self)
-    
+        """转换为 Python 列表。"""
+        return _ndarray_methods().tolist(self)
+
     def take(self, indices, axis=None):
-        """Take elements from an array along an axis."""
-        return array_methods.NdArrayMethods.take(self, indices, axis)
-    
+        """根据索引取元素。"""
+        return _ndarray_methods().take(self, indices, axis)
+
     def put(self, indices, values):
-        """Set elements in an array using indices."""
-        array_methods.NdArrayMethods.put(self, indices, values)
-    
+        """设置指定位置的元素。"""
+        _ndarray_methods().put(self, indices, values)
+
     def repeat(self, repeats, axis=None):
-        """Repeat elements of an array."""
-        return array_methods.NdArrayMethods.repeat(self, repeats, axis)
-    
+        """重复元素。"""
+        return _ndarray_methods().repeat(self, repeats, axis)
+
     def nonzero(self):
-        """Return the indices of non-zero elements."""
-        return array_methods.NdArrayMethods.nonzero(self)
-    
+        """返回非零元素索引。"""
+        return _ndarray_methods().nonzero(self)
+
     # ========== 数学方法 ==========
-    
+
     def sin(self):
-        """Compute sine."""
-        return math_functions.sin(self)
-    
+        """计算正弦。"""
+        return _math_funcs().sin(self)
+
     def cos(self):
-        """Compute cosine."""
-        return math_functions.cos(self)
-    
+        """计算余弦。"""
+        return _math_funcs().cos(self)
+
     def tan(self):
-        """Compute tangent."""
-        return math_functions.tan(self)
-    
+        """计算正切。"""
+        return _math_funcs().tan(self)
+
     def sqrt(self):
-        """Compute square root."""
-        return math_functions.sqrt(self)
-    
+        """计算平方根。"""
+        return _math_funcs().sqrt(self)
+
     def abs(self):
-        """Compute absolute value."""
-        return math_functions.abs(self)
-    
+        """计算绝对值。"""
+        return _math_funcs().abs(self)
+
     def exp(self):
-        """Compute exponential."""
-        return math_functions.exp(self)
-    
+        """计算指数。"""
+        return _math_funcs().exp(self)
+
     def log(self):
-        """Compute natural logarithm."""
-        return math_functions.log(self)
-    
+        """计算自然对数。"""
+        return _math_funcs().log(self)
+
     def log10(self):
-        """Compute base-10 logarithm."""
-        return math_functions.log10(self)
-    
+        """计算以10为底的对数。"""
+        return _math_funcs().log10(self)
+
     def log2(self):
-        """Compute base-2 logarithm."""
-        return math_functions.log2(self)
-    
+        """计算以2为底的对数。"""
+        return _math_funcs().log2(self)
+
     def clip(self, a_min, a_max):
-        """Clip values."""
-        return math_functions.clip(self, a_min, a_max)
-    
+        """限制值范围。"""
+        return _math_funcs().clip(self, a_min, a_max)
+
     def round(self, decimals=0):
-        """Round to specified decimals."""
-        return math_functions.around(self, decimals)
-    
+        """四舍五入到指定小数位。"""
+        if decimals == 0:
+            return _wrap_result(self._array.__round__(None))
+        return _wrap_result(self._array.__round__(decimals))
+
     def floor(self):
-        """Floor values."""
-        return math_functions.floor(self)
-    
+        """向下取整。"""
+        return _math_funcs().floor(self)
+
     def ceil(self):
-        """Ceil values."""
-        return math_functions.ceil(self)
-    
+        """向上取整。"""
+        return _math_funcs().ceil(self)
+
     def all(self):
-        """Test if all elements are true."""
+        """测试是否所有元素为真。"""
         return _core.all(self._array)
-    
+
     def any(self):
-        """Test if any element is true."""
+        """测试是否有任何元素为真。"""
         return _core.any(self._array)
+
+
+def _ensure(x):
+    """将列表/元组转换为 ndarray。"""
+    if isinstance(x, (list, tuple)):
+        return _core.ndarray(x)
+    elif hasattr(x, '_array'):
+        return x._array
+    elif hasattr(x, '__class__') and x.__class__.__name__ == 'ndarray':
+        return x
+    return x
+
+
+def _wrap_result(result):
+    """将原始 ndarray 结果包装到 ndarray 类中。"""
+    if hasattr(result, '__class__') and result.__class__.__name__ == 'ndarray':
+        return ndarray._wrap(result)
+    return result
+
+
+def _scalar(x):
+    """转换为标量。"""
+    if hasattr(x, 'tolist'):
+        return x.tolist()
+    return x
+
+
+def _ndarray_methods():
+    """延迟导入 array_methods 模块。"""
+    return array_methods.NdArrayMethods
+
+
+def _math_funcs():
+    """延迟导入 math_functions 模块。"""
+    from . import math_functions as mf
+    return mf
+
+
+def _stat_funcs():
+    """延迟导入 statistics 模块。"""
+    from . import statistics as st
+    return st
+
+
+def _array_ops():
+    """延迟导入 array_ops 模块。"""
+    from . import array_ops as ao
+    return ao
 
 
 # ========== 构造/工厂函数 ==========
 
 def array(data, dtype=None, copy=True, order='K', subok=False, ndmin=0):
-    """Create an array."""
+    """创建数组。"""
     return ndarray(data)
 
 
 def asarray(a, dtype=None, order=None):
-    """Convert the input to an array."""
+    """转换输入为数组。"""
     if isinstance(a, ndarray):
         return a
     return ndarray(a)
 
 
 def asanyarray(a, dtype=None, order=None):
-    """Convert the input to an ndarray."""
+    """转换输入为 ndarray。"""
     return asarray(a, dtype, order)
 
 
 def copy(a, order='K'):
-    """Return an array copy of the given object."""
+    """返回数组副本。"""
     return ndarray(a).copy()
 
 
 def zeros(shape, dtype=None, order='C'):
-    """Return a new array of given shape and type, filled with zeros."""
+    """返回指定形状的零数组。"""
     return ndarray(_core.zeros(shape))
 
 
 def ones(shape, dtype=None, order='C'):
-    """Return a new array of given shape and type, filled with ones."""
+    """返回指定形状的1数组。"""
     return ndarray(_core.ones(shape))
 
 
 def empty(shape, dtype=None, order='C'):
-    """Return a new array of given shape and type, without initializing entries."""
+    """返回指定形状的空数组。"""
     return ndarray(_core.empty(shape))
 
 
 def full(shape, fill_value, dtype=None, order='C'):
-    """Return a new array of given shape and type, filled with fill_value."""
+    """返回指定形状的填充数组。"""
     return ndarray(_core.full(shape, fill_value))
 
 
 def zeros_like(a, dtype=None, order='K', subok=True, shape=None):
-    """Return an array of zeros with the same shape and type as a given array."""
+    """返回与输入形状相同的零数组。"""
     arr = ndarray(a)
     return zeros(arr.shape)
 
 
 def ones_like(a, dtype=None, order='K', subok=True, shape=None):
-    """Return an array of ones with the same shape and type as a given array."""
+    """返回与输入形状相同的1数组。"""
     arr = ndarray(a)
     return ones(arr.shape)
 
 
 def empty_like(a, dtype=None, order='K', subok=True, shape=None):
-    """Return an empty array with the same shape and type as a given array."""
+    """返回与输入形状相同的空数组。"""
     arr = ndarray(a)
     return empty(arr.shape)
 
 
 def full_like(a, fill_value, dtype=None, order='K', subok=True, shape=None):
-    """Return a full array with the same shape and type as a given array."""
+    """返回与输入形状相同的填充数组。"""
     arr = ndarray(a)
     return full(arr.shape, fill_value)
 
 
 def eye(N, M=None, k=0, dtype=None, order='C'):
-    """Return a 2-D array with ones on the diagonal and zeros elsewhere."""
+    """返回对角线为1的二维数组。"""
     return ndarray(_core.eye(N, M, k))
 
 
 def identity(n, dtype=None):
-    """Return the identity array."""
+    """返回单位矩阵。"""
     return eye(n)
 
 
 def arange(start=0, stop=None, step=1, dtype=None):
-    """Return evenly spaced values within a given interval."""
+    """返回给定间隔内均匀间隔的值。"""
     if stop is None:
         stop = start
         start = 0
@@ -582,7 +596,7 @@ def arange(start=0, stop=None, step=1, dtype=None):
 
 
 def linspace(start, stop, num=50, endpoint=True, retstep=False, dtype=None, axis=0):
-    """Return evenly spaced numbers over a specified interval."""
+    """返回指定间隔内均匀间隔的数字。"""
     start_val = _scalar(_ensure(start))
     stop_val = _scalar(_ensure(stop))
     result = ndarray(_core.linspace(start_val, stop_val, num))
@@ -593,79 +607,41 @@ def linspace(start, stop, num=50, endpoint=True, retstep=False, dtype=None, axis
 
 
 def logspace(start, stop, num=50, endpoint=True, base=10.0, dtype=None, axis=0):
-    """Return numbers spaced evenly on a log scale."""
-    return power(base, linspace(start, stop, num, endpoint))
+    """返回对数刻度上均匀间隔的数字。"""
+    return base ** linspace(start, stop, num, endpoint)
 
 
 def geomspace(start, stop, num=50, endpoint=True, dtype=None, axis=0):
-    """Return numbers spaced evenly on a log scale (a geometric progression)."""
+    """返回几何级数上均匀间隔的数字。"""
     if start <= 0 or stop <= 0:
         raise ValueError("geomspace requires positive start and stop values")
-    return exp(linspace(math.log(start), math.log(stop), num, endpoint))
-
-
-def _scalar(x):
-    """Convert to scalar."""
-    if hasattr(x, 'tolist'):
-        return x.tolist()
-    return x
-
-
-# ========== 数组操作函数 ==========
-reshape = array_ops.reshape
-ravel = array_ops.ravel
-moveaxis = array_ops.moveaxis
-rollaxis = array_ops.rollaxis
-broadcast_to = array_ops.broadcast_to
-transpose = array_ops.transpose
-swapaxes = array_ops.swapaxes
-expand_dims = array_ops.expand_dims
-squeeze = array_ops.squeeze
-concatenate = array_ops.concatenate
-stack = array_ops.stack
-vstack = array_ops.vstack
-hstack = array_ops.hstack
-dstack = array_ops.dstack
-column_stack = array_ops.column_stack
-split = array_ops.split
-hsplit = array_ops.hsplit
-vsplit = array_ops.vsplit
-dsplit = array_ops.dsplit
-tile = array_ops.tile
-repeat = array_ops.repeat
-flip = array_ops.flip
-fliplr = array_ops.fliplr
-flipud = array_ops.flipud
-roll = array_ops.roll
-rot90 = array_ops.rot90
+    return ndarray(_core.exp(_ensure(linspace(_core.log(_ensure(ndarray([start])))[0], _core.log(_ensure(ndarray([stop])))[0], num, endpoint))))
 
 
 # ========== 索引函数 ==========
+
 def where(condition, x=None, y=None):
-    """Return elements chosen from x or y depending on condition."""
-    if x is None and y is None:
-        return ndarray(_core.nonzero(_ensure(condition)))
-    return ndarray(_core.where(_ensure(condition), _ensure(x), _ensure(y)))
+    """根据条件返回元素或索引。"""
+    if x is not None and y is not None:
+        return ndarray(_core.where(_ensure(condition), _ensure(x), _ensure(y)))
+    return ndarray(_core.nonzero(_ensure(condition)))
 
 
 def take(a, indices, axis=None, out=None, mode='raise'):
-    """Take elements from an array along an axis."""
-    from .__init__ import ndarray
+    """沿指定轴取元素。"""
     arr = ndarray(a)
     return arr.take(indices, axis)
 
 
 def put(a, indices, values, mode='raise'):
-    """Set elements in an array using indices."""
-    from .__init__ import ndarray
+    """设置指定位置的元素。"""
     arr = ndarray(a)
     arr.put(indices, values)
 
 
 def select(condlist, choicelist, default=0):
-    """Return an array drawn from elements in choicelist, depending on conditions."""
-    from .__init__ import ndarray
-    result = ndarray([default] * len(ndarray(condlist[0])))
+    """根据条件列表选择值。"""
+    result = ndarray([default] * ndarray(condlist[0]).size)
     for cond, choice in zip(condlist, choicelist):
         mask = ndarray(cond)
         result = where(mask, choice, result)
@@ -673,106 +649,89 @@ def select(condlist, choicelist, default=0):
 
 
 def nonzero(a):
-    """Return the indices of the non-zero elements."""
-    from .__init__ import ndarray
-    arr = ndarray(a)
-    return arr.nonzero()
+    """返回非零元素的索引，返回元组形式的数组（兼容NumPy）。"""
+    raw = _core.nonzero(_ensure(a))
+    # raw is Vec<Vec<usize>>, convert to tuple of 1D arrays
+    result = []
+    for indices in raw:
+        arr = _core.ndarray(list(indices))
+        result.append(ndarray(arr))
+    return tuple(result)
 
 
 def argwhere(a):
-    """Find the indices of array elements that are non-zero."""
-    from .__init__ import ndarray
-    arr = ndarray(a)
-    return arr.nonzero()
+    """查找非零元素的索引。"""
+    return ndarray(_core.argwhere(_ensure(a)))
 
 
 def flatnonzero(a):
-    """Return indices that are non-zero in the flattened version of a."""
-    from .__init__ import ndarray
-    arr = ndarray(a)
-    return arr.nonzero()
+    """返回扁平化数组中非零元素的索引。"""
+    return ndarray(_core.flatnonzero(_ensure(a)))
 
 
-# ========== 数学函数 ==========
-sin = math_functions.sin
-cos = math_functions.cos
-tan = math_functions.tan
-arcsin = math_functions.arcsin
-arccos = math_functions.arccos
-arctan = math_functions.arctan
-arctan2 = math_functions.arctan2
-deg2rad = math_functions.deg2rad
-rad2deg = math_functions.rad2deg
-sinh = math_functions.sinh
-cosh = math_functions.cosh
-tanh = math_functions.tanh
-asinh = math_functions.asinh
-acosh = math_functions.acosh
-atanh = math_functions.atanh
-exp = math_functions.exp
-expm1 = math_functions.expm1
-log = math_functions.log
-log10 = math_functions.log10
-log2 = math_functions.log2
-log1p = math_functions.log1p
-around = math_functions.around
-floor = math_functions.floor
-ceil = math_functions.ceil
-trunc = math_functions.trunc
-fix = math_functions.fix
-sqrt = math_functions.sqrt
-square = math_functions.square
-cbrt = math_functions.cbrt
-abs = math_functions.abs
-sign = math_functions.sign
-clip = math_functions.clip
-sinc = math_functions.sinc
-heaviside = math_functions.heaviside
-add = math_functions.add
-subtract = math_functions.subtract
-multiply = math_functions.multiply
-divide = math_functions.divide
-power = math_functions.power
-mod = math_functions.mod
-greater = math_functions.greater
-less = math_functions.less
-equal = math_functions.equal
-logical_and = math_functions.logical_and
-logical_or = math_functions.logical_or
-isclose = math_functions.isclose
-allclose = math_functions.allclose
+# ========== 缺失构造函数 ==========
+
+def fromfunction(function, shape, *, dtype=None, **kwargs):
+    """根据函数和形状创建数组。"""
+    indices = [ndarray(list(range(d))) for d in shape]
+    grid = _core.meshgrid(*indices, indexing='ij')
+    return function(*grid, **kwargs)
 
 
-# ========== 统计函数 ==========
-sum = statistics.sum
-mean = statistics.mean
-std = statistics.std
-var = statistics.var
-min = statistics.min
-max = statistics.max
-ptp = statistics.ptp
-median = statistics.median
-percentile = statistics.percentile
-quantile = statistics.quantile
-nanmedian = statistics.nanmedian
-nanpercentile = statistics.nanpercentile
-argmax = statistics.argmax
-argmin = statistics.argmin
-argsort = statistics.argsort
-sort = statistics.sort
-searchsorted = statistics.searchsorted
-cov = statistics.cov
-corrcoef = statistics.corrcoef
-histogram = statistics.histogram
-histogram2d = statistics.histogram2d
-histogramdd = statistics.histogramdd
-digitize = statistics.digitize
+def frombuffer(buffer, dtype=None, count=-1, offset=0, *, like=None):
+    """从缓冲区创建一维数组（使用 Rust 层实现）。"""
+    if isinstance(buffer, bytes):
+        return ndarray(_core.bytes_to_floats(buffer, count))
+    return ndarray(list(buffer))
+
+
+class _RClass:
+    """行连接辅助类，模拟 np.r_。"""
+    def __getitem__(self, item):
+        if not isinstance(item, tuple):
+            item = (item,)
+        arrays = []
+        for it in item:
+            arrays.append(ndarray(it))
+        return concatenate([a.ravel() for a in arrays])
+
+
+r_ = _RClass()
+
+
+def mgrid(*ranges):
+    """密集网格索引，返回密集网格数组。"""
+    arrays = []
+    for r in ranges:
+        if isinstance(r, slice):
+            arrays.append(ndarray(arange(r.start or 0, r.stop, r.step or 1)))
+        elif isinstance(r, (int, float)):
+            arrays.append(ndarray([float(r)]))
+        else:
+            arrays.append(ndarray(r))
+    grids = _core.meshgrid(*arrays, indexing='ij')
+    if isinstance(grids, tuple) and len(grids) > 1:
+        return stack(grids, axis=0)
+    return grids
+
+
+def ogrid(*ranges):
+    """开放网格索引，返回开放网格数组。"""
+    arrays = []
+    for r in ranges:
+        if isinstance(r, slice):
+            arrays.append(ndarray(arange(r.start or 0, r.stop, r.step or 1)))
+        elif isinstance(r, (int, float)):
+            arrays.append(ndarray([float(r)]))
+        else:
+            arrays.append(ndarray(r))
+    return _core.meshgrid(*arrays, indexing='ij')
 
 
 # ========== FFT 函数 ==========
 
 def fft(a, n=None, axis=-1):
-    """Compute the one-dimensional discrete Fourier Transform."""
+    """计算一维离散傅里叶变换。"""
     if isinstance(a, ndarray):
         a = a.tolist()
     elif isinstance(a, (list, tuple)):
@@ -783,12 +742,12 @@ def fft(a, n=None, axis=-1):
 
 
 def ifft(a, n=None, axis=-1):
-    """Compute the one-dimensional inverse discrete Fourier Transform."""
+    """计算一维逆离散傅里叶变换。"""
     return _core.py_ifft(a)
 
 
 def rfft(a, n=None, axis=-1):
-    """Compute the one-dimensional discrete Fourier Transform for real input."""
+    """计算实输入的一维离散傅里叶变换。"""
     if isinstance(a, ndarray):
         a = a.tolist()
     elif isinstance(a, (list, tuple)):
@@ -799,14 +758,13 @@ def rfft(a, n=None, axis=-1):
 
 
 def irfft(a, n=None, axis=-1):
-    """Compute the inverse of rfft."""
+    """计算 rfft 的逆变换。"""
     return _core.py_irfft(a, n)
 
 
 # ========== 常量 ==========
-import math
-pi = math.pi
-e = math.e
+pi = 3.141592653589793
+e = 2.718281828459045
 euler_gamma = 0.5772156649015328606
 inf = float('inf')
 nan = float('nan')
@@ -816,29 +774,126 @@ newaxis = None
 # ========== 判断函数 ==========
 
 def isnan(x):
-    """Test element-wise for NaN and return result as a boolean array."""
-    from .__init__ import ndarray
+    """逐元素检测是否为 NaN。"""
     arr = ndarray(x)
     return ndarray(_core.isnan(arr._array))
 
 
 def isinf(x):
-    """Test element-wise for infinity and return result as a boolean array."""
-    from .__init__ import ndarray
+    """逐元素检测是否为无穷大。"""
     arr = ndarray(x)
     return ndarray(_core.isinf(arr._array))
 
 
 def isfinite(x):
-    """Test element-wise for finiteness and return result as a boolean array."""
-    from .__init__ import ndarray
+    """逐元素检测是否为有限值。"""
     arr = ndarray(x)
     return ndarray(_core.isfinite(arr._array))
 
 
-# ========== 子模块 ==========
-from .linalg import linalg_module as _linalg_module
-from .random import random_module as _random_module
+# 数组操作函数
+reshape = _array_ops_module.reshape
+ravel = _array_ops_module.ravel
+moveaxis = _array_ops_module.moveaxis
+rollaxis = _array_ops_module.rollaxis
+broadcast_to = _array_ops_module.broadcast_to
+transpose = _array_ops_module.transpose
+swapaxes = _array_ops_module.swapaxes
+expand_dims = _array_ops_module.expand_dims
+squeeze = _array_ops_module.squeeze
+concatenate = _array_ops_module.concatenate
+stack = _array_ops_module.stack
+vstack = _array_ops_module.vstack
+hstack = _array_ops_module.hstack
+dstack = _array_ops_module.dstack
+column_stack = _array_ops_module.column_stack
+split = _array_ops_module.split
+hsplit = _array_ops_module.hsplit
+vsplit = _array_ops_module.vsplit
+dsplit = _array_ops_module.dsplit
+tile = _array_ops_module.tile
+repeat = _array_ops_module.repeat
+flip = _array_ops_module.flip
+fliplr = _array_ops_module.fliplr
+flipud = _array_ops_module.flipud
+roll = _array_ops_module.roll
+rot90 = _array_ops_module.rot90
+
+# 数学函数
+sin = _math_functions_module.sin
+cos = _math_functions_module.cos
+tan = _math_functions_module.tan
+arcsin = _math_functions_module.arcsin
+arccos = _math_functions_module.arccos
+arctan = _math_functions_module.arctan
+arctan2 = _math_functions_module.arctan2
+deg2rad = _math_functions_module.deg2rad
+rad2deg = _math_functions_module.rad2deg
+sinh = _math_functions_module.sinh
+cosh = _math_functions_module.cosh
+tanh = _math_functions_module.tanh
+asinh = _math_functions_module.asinh
+acosh = _math_functions_module.acosh
+atanh = _math_functions_module.atanh
+exp = _math_functions_module.exp
+expm1 = _math_functions_module.expm1
+log = _math_functions_module.log
+log10 = _math_functions_module.log10
+log2 = _math_functions_module.log2
+log1p = _math_functions_module.log1p
+around = _math_functions_module.around
+floor = _math_functions_module.floor
+ceil = _math_functions_module.ceil
+trunc = _math_functions_module.trunc
+fix = _math_functions_module.fix
+sqrt = _math_functions_module.sqrt
+square = _math_functions_module.square
+cbrt = _math_functions_module.cbrt
+abs = _math_functions_module.abs
+sign = _math_functions_module.sign
+clip = _math_functions_module.clip
+sinc = _math_functions_module.sinc
+heaviside = _math_functions_module.heaviside
+add = _math_functions_module.add
+subtract = _math_functions_module.subtract
+multiply = _math_functions_module.multiply
+divide = _math_functions_module.divide
+power = _math_functions_module.power
+mod = _math_functions_module.mod
+greater = _math_functions_module.greater
+less = _math_functions_module.less
+equal = _math_functions_module.equal
+logical_and = _math_functions_module.logical_and
+logical_or = _math_functions_module.logical_or
+isclose = _math_functions_module.isclose
+allclose = _math_functions_module.allclose
+
+# 统计函数
+sum = _statistics_module.sum
+mean = _statistics_module.mean
+std = _statistics_module.std
+var = _statistics_module.var
+min = _statistics_module.min
+max = _statistics_module.max
+ptp = _statistics_module.ptp
+median = _statistics_module.median
+percentile = _statistics_module.percentile
+quantile = _statistics_module.quantile
+nanmedian = _statistics_module.nanmedian
+nanpercentile = _statistics_module.nanpercentile
+argmax = _statistics_module.argmax
+argmin = _statistics_module.argmin
+argsort = _statistics_module.argsort
+sort = _statistics_module.sort
+searchsorted = _statistics_module.searchsorted
+cov = _statistics_module.cov
+corrcoef = _statistics_module.corrcoef
+histogram = _statistics_module.histogram
+histogram2d = _statistics_module.histogram2d
+histogramdd = _statistics_module.histogramdd
+digitize = _statistics_module.digitize
+
+# 子模块
 
 linalg = _linalg_module()
 random = _random_module()
@@ -847,22 +902,19 @@ random = _random_module()
 # ========== 导出列表 ==========
 __all__ = [
     'ndarray', 'NdArrayIter',
-    # 构造函数
     'array', 'asarray', 'asanyarray', 'copy',
     'zeros', 'ones', 'empty', 'full',
     'zeros_like', 'ones_like', 'empty_like', 'full_like',
     'eye', 'identity',
     'arange', 'linspace', 'logspace', 'geomspace',
-    # 数组操作
+    'fromfunction', 'frombuffer', 'r_', 'mgrid', 'ogrid',
     'reshape', 'ravel', 'moveaxis', 'rollaxis', 'broadcast_to',
     'transpose', 'swapaxes', 'expand_dims', 'squeeze',
     'concatenate', 'stack', 'vstack', 'hstack', 'dstack', 'column_stack',
     'split', 'hsplit', 'vsplit', 'dsplit',
     'tile', 'repeat',
     'flip', 'fliplr', 'flipud', 'roll', 'rot90',
-    # 索引函数
     'where', 'take', 'put', 'select', 'nonzero', 'argwhere', 'flatnonzero',
-    # 数学函数
     'sin', 'cos', 'tan', 'arcsin', 'arccos', 'arctan', 'arctan2',
     'deg2rad', 'rad2deg',
     'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh',
@@ -871,17 +923,15 @@ __all__ = [
     'sqrt', 'square', 'cbrt', 'abs', 'sign', 'clip', 'sinc', 'heaviside',
     'add', 'subtract', 'multiply', 'divide', 'power', 'mod',
     'greater', 'less', 'equal', 'logical_and', 'logical_or', 'isclose', 'allclose',
-    # 统计函数
     'sum', 'mean', 'std', 'var', 'min', 'max', 'ptp',
     'median', 'percentile', 'quantile', 'nanmedian', 'nanpercentile',
     'argmax', 'argmin', 'argsort', 'sort', 'searchsorted',
     'cov', 'corrcoef',
     'histogram', 'histogram2d', 'histogramdd', 'digitize',
-    # FFT
     'fft', 'ifft', 'rfft', 'irfft',
-    # 常量和判断函数
     'pi', 'e', 'euler_gamma', 'inf', 'nan', 'newaxis',
     'isnan', 'isinf', 'isfinite',
-    # 子模块
-    'linalg', 'random'
+    'save', 'load', 'loadtxt', 'savetxt', 'savez',
+    'Poly', 'polyval', 'polyfit', 'polyder', 'polyint', 'polyroots',
+    'linalg', 'random', 'load_npz'
 ]

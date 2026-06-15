@@ -5,10 +5,21 @@ import rsnum._core as _core
 
 class random_module:
     """随机数生成模块"""
-    
+
     def __init__(self):
         self._random = _core.random
-    
+
+    def default_rng(self, seed=None):
+        """创建默认的随机数生成器（新 API）。
+
+        参数:
+            seed: 随机种子。
+
+        返回:
+            Generator: 随机数生成器。
+        """
+        return _core.random.Generator(seed)
+
     def seed(self, s):
         """设置随机种子。"""
         return self._random.seed(s)

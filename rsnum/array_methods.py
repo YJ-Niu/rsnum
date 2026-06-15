@@ -5,11 +5,11 @@ ndarray 对象方法模块
 """
 
 import rsnum._core as _core
+from .__init__ import ndarray, _ensure
 
 
 def _wrap_result(result):
     """包装结果为 ndarray 对象"""
-    from .__init__ import ndarray
     if hasattr(result, '__class__') and result.__class__.__name__ == 'ndarray':
         return ndarray._wrap(result)
     return result
@@ -130,7 +130,6 @@ class NdArrayMethods:
         返回:
             ndarray: 交换轴后的数组。
         """
-        from .__init__ import ndarray
         arr_obj = ndarray(arr._array)
         axes = list(range(arr_obj.ndim))
         axes[axis1], axes[axis2] = axes[axis2], axes[axis1]
@@ -272,31 +271,8 @@ class NdArrayMethods:
         返回:
             ndarray: 累积和数组。
         """
-        from .__init__ import ndarray
-        arr_obj = ndarray(arr._array)
-        data = arr_obj.tolist()
-        
-        def cumsum_recursive(data, axis=0):
-            if isinstance(data, (list, tuple)):
-                if axis == 0:
-                    result = []
-                    total = 0
-                    for item in data:
-                        if isinstance(item, (list, tuple)):
-                            item_sum = cumsum_recursive(item, axis=0)
-                            total = [total[i] + item_sum[i] for i in range(len(item_sum))] if isinstance(total, list) else item_sum
-                            result.append(total.copy())
-                        else:
-                            total += item
-                            result.append(total)
-                    return result
-                else:
-                    return [cumsum_recursive(row, axis-1) for row in data]
-            else:
-                return data
-        
-        result_list = cumsum_recursive(data)
-        return ndarray(result_list)
+        result = arr._array.cumsum(axis)
+        return _wrap_result(result)
     
     @staticmethod
     def cumprod(arr, axis=None):
@@ -309,31 +285,8 @@ class NdArrayMethods:
         返回:
             ndarray: 累积乘积数组。
         """
-        from .__init__ import ndarray
-        arr_obj = ndarray(arr._array)
-        data = arr_obj.tolist()
-        
-        def cumprod_recursive(data, axis=0):
-            if isinstance(data, (list, tuple)):
-                if axis == 0:
-                    result = []
-                    total = 1
-                    for item in data:
-                        if isinstance(item, (list, tuple)):
-                            item_prod = cumprod_recursive(item, axis=0)
-                            total = [total[i] * item_prod[i] for i in range(len(item_prod))] if isinstance(total, list) else item_prod
-                            result.append(total.copy())
-                        else:
-                            total *= item
-                            result.append(total)
-                    return result
-                else:
-                    return [cumprod_recursive(row, axis-1) for row in data]
-            else:
-                return data
-        
-        result_list = cumprod_recursive(data)
-        return ndarray(result_list)
+        result = arr._array.cumprod(axis)
+        return _wrap_result(result)
     
     @staticmethod
     def argmax(arr, axis=None):
@@ -348,7 +301,6 @@ class NdArrayMethods:
         """
         if axis is None:
             return arr._array.argmax()
-        from .__init__ import ndarray
         arr_obj = ndarray(arr._array)
         if axis < 0:
             axis += arr_obj.ndim
@@ -376,7 +328,6 @@ class NdArrayMethods:
         """
         if axis is None:
             return arr._array.argmin()
-        from .__init__ import ndarray
         arr_obj = ndarray(arr._array)
         if axis < 0:
             axis += arr_obj.ndim
@@ -491,7 +442,6 @@ class NdArrayMethods:
         返回:
             ndarray: 选取的元素。
         """
-        from .__init__ import _ensure
         result = arr._array.take(_ensure(indices), axis)
         return _wrap_result(result)
     
@@ -504,7 +454,6 @@ class NdArrayMethods:
             indices: 索引数组。
             values: 要放入的值。
         """
-        from .__init__ import _ensure
         arr._array.put(_ensure(indices), _ensure(values))
     
     @staticmethod
@@ -528,7 +477,11 @@ class NdArrayMethods:
         返回非零元素的索引。
 
         返回:
-            ndarray: 非零元素的索引。
+            tuple: 非零元素的索引元组。
         """
-        result = arr._array.nonzero()
-        return _wrap_result(result)
+        raw = arr._array.nonzero()
+        # raw is list of lists (Vec<Vec<usize>>), convert to tuple of 1D arrays
+        result = []
+        for indices in raw:
+            result.append(ndarray(list(indices)))
+        return tuple(result)
