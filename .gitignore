@@ -27,6 +27,7 @@ uv.lock
 Thumbs.db
 
 # Data / plots
+wheelhouse/
 main*.py
 test*.py
 # Environment

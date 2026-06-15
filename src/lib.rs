@@ -5,6 +5,7 @@ use pyo3::types::{PyFloat, PyList, PySlice, PyTuple};
 
 mod linalg;
 mod random;
+mod fft;
 
 fn parse_py_list_to_flat(data: &Bound<'_, PyAny>) -> PyResult<(Vec<f64>, Vec<usize>)> {
     if let Ok(val) = data.extract::<f64>() {
@@ -1922,6 +1923,11 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(squeeze, m)?)?;
     m.add_function(wrap_pyfunction!(flatten, m)?)?;
     m.add_function(wrap_pyfunction!(reshape, m)?)?;
+
+    m.add_function(wrap_pyfunction!(fft::py_fft, m)?)?;
+    m.add_function(wrap_pyfunction!(fft::py_ifft, m)?)?;
+    m.add_function(wrap_pyfunction!(fft::py_rfft, m)?)?;
+    m.add_function(wrap_pyfunction!(fft::py_irfft, m)?)?;
 
     let random_module = PyModule::new(m.py(), "random")?;
     random::init_module(&random_module)?;
