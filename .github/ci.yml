@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.9", "3.13"]
+      fail-fast: false
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Build wheel and install
+        uses: PyO3/maturin-action@v1
+        with:
+          args: --release -o dist
+          pip: uv
+      
+      - name: Install dependencies
+        run: uv pip install numpy xlrd --system
+
+      - name: Run tests
+        run: python -c "
+          import rsplotlib.pyplot as plt;
+          from rsplotlib.gridspec import GridSpec;
+          fig = plt.figure();
+          gs = GridSpec(1, 1);
+          ax = fig.add_subplot(gs[0, 0]);
+          ax.plot([1, 2, 3], [1, 2, 3]);
+          plt.savefig('/tmp/test_ci.png');
+          print('Test passed!');
+        "
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Rust formatting
+        uses: actions-rust-lang/rustfmt@v1
+        with:
+          args: --check
+
+      - name: Run clippy
+        uses: actions-rust-lang/clippy@v1
+        with:
+          args: -- -D warnings

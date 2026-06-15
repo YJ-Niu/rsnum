@@ -1913,8 +1913,15 @@ fn ceil(x: &NdArray) -> NdArray {
 }
 
 #[pyfunction]
-fn round(x: &NdArray) -> NdArray {
-    unary_math_op(x, |v| v.round())
+fn round(x: &NdArray, ndigits: Option<i32>) -> NdArray {
+    let data = x.data.mapv(|v| match ndigits {
+        Some(n) => {
+            let factor = 10f64.powi(n);
+            (v * factor).round() / factor
+        }
+        None => v.round(),
+    });
+    NdArray { data }
 }
 
 #[pyfunction]
