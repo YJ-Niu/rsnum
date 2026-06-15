@@ -5,7 +5,10 @@ build-backend = "maturin"
 [project]
 name = "rsnum"
 requires-python = ">=3.8"
+description = "A Rust-powered NumPy-compatible array library."
+license = { file = "LICENSE" }
 classifiers = [
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
