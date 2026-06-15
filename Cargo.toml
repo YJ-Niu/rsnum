@@ -1,10 +1,10 @@
 [package]
-name = "rsnum"
-version = "0.1.4"
+name = "rsnumpy"
+version = "0.1.5"
 edition = "2024"
 
 [lib]
-name = "rsnum"
+name = "rsnumpy"
 crate-type = ["cdylib"]
 
 [dependencies]

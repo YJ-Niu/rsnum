@@ -1,6 +1,6 @@
-"""rsnum.linalg - 线性代数模块 - 薄包装，所有实现位于 Rust。"""
+"""rsnumpy.linalg - 线性代数模块 - 薄包装，所有实现位于 Rust。"""
 
-import rsnum._core as _core
+import rsnumpy._core as _core
 
 
 def _ensure(x):

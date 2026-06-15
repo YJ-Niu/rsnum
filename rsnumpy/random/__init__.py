@@ -1,6 +1,6 @@
-"""rsnum.random - 随机数生成模块"""
+"""rsnumpy.random - 随机数生成模块"""
 
-import rsnum._core as _core
+import rsnumpy._core as _core
 
 
 class random_module:

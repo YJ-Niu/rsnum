@@ -5,7 +5,7 @@ import rsplotlib.pyplot as plt
 from rsplotlib import style
 import xlrd
 import datetime
-import rsnum as np
+import rsnumpy as np
 from rsplotlib.gridspec import GridSpec
 # import test_times
 # import version

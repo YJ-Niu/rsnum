@@ -158,7 +158,7 @@ impl NdArray {
 
     fn __repr__(&self) -> PyResult<String> {
         let arr_str = format_array_repr(&self.data, "");
-        Ok(format!("rsnum.ndarray({}) dtype=float64", arr_str))
+        Ok(format!("rsnumpy.ndarray({}) dtype=float64", arr_str))
     }
 
     fn __len__(&self) -> PyResult<usize> {

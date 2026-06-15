@@ -1,10 +1,10 @@
 """
 ndarray 对象方法模块
 
-此模块包含 rsnum.ndarray 类的所有对象方法和属性。
+此模块包含 rsnumpy.ndarray 类的所有对象方法和属性。
 """
 
-import rsnum._core as _core
+import rsnumpy._core as _core
 from .__init__ import ndarray, _ensure
 
 

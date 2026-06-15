@@ -1,10 +1,10 @@
-"""rsnum - A Rust-powered NumPy-compatible array library.
+"""rsnumpy - A Rust-powered NumPy-compatible array library.
 
-rsnum provides a NumPy-compatible API implemented in Rust for better
+rsnumpy provides a NumPy-compatible API implemented in Rust for better
 performance and memory efficiency while maintaining full API compatibility.
 
 Examples:
-    >>> import rsnum as np
+    >>> import rsnumpy as np
     >>> a = np.ndarray([1, 2, 3])
     >>> np.sum(a)
     6
@@ -12,8 +12,8 @@ Examples:
     2.0
 """
 
-import rsnum._core as _core
-from rsnum._core import ndarray_iter as NdArrayIter
+import rsnumpy._core as _core
+from rsnumpy._core import ndarray_iter as NdArrayIter
 # ========== 子模块导入和函数挂载 ==========
 # 这些导入放在 ndarray 类定义之后以避免循环导入
 from . import array_methods
@@ -29,7 +29,7 @@ from .random import random_module as _random_module
 
 class ndarray:
     """
-    rsnum.ndarray - 多维数组对象。
+    rsnumpy.ndarray - 多维数组对象。
 
     这是一个 Rust 后端支持的数组类型，提供与 NumPy 兼容的功能。
 
