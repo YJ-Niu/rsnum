@@ -6,6 +6,10 @@ set -euo pipefail
 
 RELEASE=true
 OUT_DIR="wheelhouse"
+# 如果 wheelhouse 目录存在, 则删除
+if [[ -d "$OUT_DIR" ]]; then
+  rm -rf "$OUT_DIR"
+fi
 # Default python executable; may be overridden by --python or positional arg
 PYTHON_EXEC="python"
 # Flag set when the user explicitly provided a Python executable
