@@ -9,6 +9,8 @@ def _nd():
 
 
 def _wrap(result):
+    if hasattr(result, 'ndim') and result.ndim == 0:
+        return result.tolist()
     return _nd()(result)
 
 

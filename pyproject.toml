@@ -20,6 +20,8 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
+    "maturin>=1.14.0",
+    "rsplotlib>=0.1.4",
     "xlrd>=2.0.2",
 ]
 

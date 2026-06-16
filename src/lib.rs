@@ -887,32 +887,41 @@ impl NdArray {
                 let m = self.data.mean_axis(Axis(ax));
                 match m {
                     Some(mean_arr) => {
-                        let mean_val = mean_arr[0];
-                        let std_data: Vec<f64> = self
-                            .data
-                            .axis_iter(Axis(ax))
-                            .flat_map(|row| row.mapv(|x| (x - mean_val).powi(2)))
-                            .collect();
-                        let shape: Vec<usize> = self
-                            .data
-                            .shape()
-                            .iter()
+                        let shape = self.data.shape().to_vec();
+                        let axis_size = shape[ax];
+                        let pre_size: usize = shape.iter().take(ax).product();
+                        let post_size: usize = shape.iter().skip(ax + 1).product();
+                        let data_vec: Vec<f64> = self.data.iter().copied().collect();
+
+                        let mut result = Vec::with_capacity(pre_size * post_size);
+                        for outer in 0..pre_size {
+                            for inner in 0..post_size {
+                                let base = outer * axis_size * post_size + inner;
+                                let mean = mean_arr[outer * post_size + inner];
+                                let mut sum_sq = 0.0;
+                                for k in 0..axis_size {
+                                    let diff = data_vec[base + k * post_size] - mean;
+                                    sum_sq += diff * diff;
+                                }
+                                let variance = sum_sq / axis_size as f64;
+                                result.push(variance.sqrt());
+                            }
+                        }
+
+                        let new_shape: Vec<usize> = shape.iter()
                             .enumerate()
                             .filter(|(i, _)| *i != ax)
                             .map(|(_, &s)| s)
                             .collect();
-                        if shape.is_empty() {
-                            let var = std_data.iter().sum::<f64>() / std_data.len() as f64;
+
+                        if new_shape.is_empty() {
                             Ok(NdArray {
-                                data: Array::from_elem(IxDyn(&[]), var.sqrt()),
+                                data: Array::from_elem(IxDyn(&[]), result[0]),
                             })
                         } else {
-                            let arr = Array::from_shape_vec(IxDyn(&shape), std_data)
+                            let arr = Array::from_shape_vec(IxDyn(&new_shape), result)
                                 .map_err(|e| PyValueError::new_err(e.to_string()))?;
-                            let n = self.data.shape()[ax] as f64;
-                            Ok(NdArray {
-                                data: (arr / n).mapv(|x| x.sqrt()),
-                            })
+                            Ok(NdArray { data: arr })
                         }
                     }
                     None => Err(PyValueError::new_err("Invalid axis")),
@@ -941,32 +950,40 @@ impl NdArray {
                 let m = self.data.mean_axis(Axis(ax));
                 match m {
                     Some(mean_arr) => {
-                        let mean_val = mean_arr[0];
-                        let var_data: Vec<f64> = self
-                            .data
-                            .axis_iter(Axis(ax))
-                            .flat_map(|row| row.mapv(|x| (x - mean_val).powi(2)))
-                            .collect();
-                        let shape: Vec<usize> = self
-                            .data
-                            .shape()
-                            .iter()
+                        let shape = self.data.shape().to_vec();
+                        let axis_size = shape[ax];
+                        let pre_size: usize = shape.iter().take(ax).product();
+                        let post_size: usize = shape.iter().skip(ax + 1).product();
+                        let data_vec: Vec<f64> = self.data.iter().copied().collect();
+
+                        let mut result = Vec::with_capacity(pre_size * post_size);
+                        for outer in 0..pre_size {
+                            for inner in 0..post_size {
+                                let base = outer * axis_size * post_size + inner;
+                                let mean = mean_arr[outer * post_size + inner];
+                                let mut sum_sq = 0.0;
+                                for k in 0..axis_size {
+                                    let diff = data_vec[base + k * post_size] - mean;
+                                    sum_sq += diff * diff;
+                                }
+                                result.push(sum_sq / axis_size as f64);
+                            }
+                        }
+
+                        let new_shape: Vec<usize> = shape.iter()
                             .enumerate()
                             .filter(|(i, _)| *i != ax)
                             .map(|(_, &s)| s)
                             .collect();
-                        if shape.is_empty() {
-                            let v = var_data.iter().sum::<f64>() / var_data.len() as f64;
+
+                        if new_shape.is_empty() {
                             Ok(NdArray {
-                                data: Array::from_elem(IxDyn(&[]), v),
+                                data: Array::from_elem(IxDyn(&[]), result[0]),
                             })
                         } else {
-                            let arr = Array::from_shape_vec(IxDyn(&shape), var_data)
+                            let arr = Array::from_shape_vec(IxDyn(&new_shape), result)
                                 .map_err(|e| PyValueError::new_err(e.to_string()))?;
-                            let n = self.data.shape()[ax] as f64;
-                            Ok(NdArray {
-                                data: arr / n,
-                            })
+                            Ok(NdArray { data: arr })
                         }
                     }
                     None => Err(PyValueError::new_err("Invalid axis")),
