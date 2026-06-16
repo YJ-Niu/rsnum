@@ -462,7 +462,7 @@ fn norm(x: &NdArray, ord: Option<f64>, axis: Option<isize>) -> PyResult<NdArray>
         }
     } else if shape.len() == 1 {
         if ord == 1.0 {
-            let val: f64 = data.iter().sum::<f64>();
+            let val: f64 = data.iter().map(|v| v.abs()).sum();
             Ok(NdArray { data: Array::from_elem(IxDyn(&[]), val) })
         } else if ord == 2.0 {
             let val: f64 = data.iter().map(|v| v * v).sum::<f64>().sqrt();

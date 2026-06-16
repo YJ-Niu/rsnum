@@ -78,16 +78,48 @@ class ndarray:
 
     def __getitem__(self, key):
         if isinstance(key, tuple):
-            ranges = []
+            # 拆分为整数索引和切片，避免把整数当作 (i, i+1, 1) 的范围
+            int_indices = []
+            slice_ranges = []
+            int_positions = []
+            slice_positions = []
             for i, k in enumerate(key):
                 if isinstance(k, slice):
                     start = k.start or 0
                     end = k.stop if k.stop is not None else self.shape[i]
                     step = k.step or 1
-                    ranges.append((start, end, step))
+                    slice_ranges.append((start, end, step))
+                    slice_positions.append(i)
                 else:
-                    ranges.append((int(k), int(k) + 1, 1))
-            return _wrap_result(_core.tuple_getitem(self._array, ranges))
+                    int_indices.append(int(k))
+                    int_positions.append(i)
+            if not slice_ranges:
+                # 全部是整数索引，递归走 Rust 的 __getitem__，最后变成标量
+                cur = self
+                for idx in int_indices:
+                    cur = _wrap_result(cur._array[idx])
+                return cur
+            # 既有整数又有切片：先按整数逐维减维，再按切片
+            cur = self
+            for idx in reversed(int_indices):
+                cur = _wrap_result(cur._array[idx])
+            if not isinstance(cur, ndarray):
+                return cur
+            # cur 的 ndim 现在等于切片数量，把切片按原 key 中的轴位置重新组装
+            new_key = []
+            for i in range(len(key)):
+                if i in int_positions:
+                    new_key.append(slice(0, cur.shape[0]))  # 占位，不再使用
+                else:
+                    new_key.append(key[i])
+            # 直接调用 _core.tuple_getitem 但只针对剩余维度的切片
+            return _wrap_result(_core.tuple_getitem(cur._array, slice_ranges))
+        elif isinstance(key, ndarray):
+            # 布尔 / 花式索引：把包装的 ndarray 转换为底层 _array
+            return _wrap_result(self._array[key._array])
+        elif isinstance(key, (list, tuple)) and any(isinstance(x, bool) for x in key):
+            # 布尔列表索引
+            return _wrap_result(self._array[key])
         else:
             result = self._array[key]
             return _wrap_result(result)
@@ -158,8 +190,8 @@ class ndarray:
 
     def __matmul__(self, other):
         if isinstance(other, ndarray):
-            return _wrap_result(_core.matmul(self._array, other._array))
-        return _wrap_result(_core.matmul(self._array, other))
+            return _wrap_result(_core.linalg.matmul(self._array, other._array))
+        return _wrap_result(_core.linalg.matmul(self._array, other))
 
     def __pow__(self, other):
         if isinstance(other, ndarray):
@@ -586,14 +618,17 @@ def linspace(start, stop, num=50, endpoint=True, retstep=False, dtype=None, axis
 
 def logspace(start, stop, num=50, endpoint=True, base=10.0, dtype=None, axis=0):
     """返回对数刻度上均匀间隔的数字。"""
-    return base ** linspace(start, stop, num, endpoint)
+    return power(ndarray([float(base)]), linspace(start, stop, num, endpoint))
 
 
 def geomspace(start, stop, num=50, endpoint=True, dtype=None, axis=0):
     """返回几何级数上均匀间隔的数字。"""
+    import math
     if start <= 0 or stop <= 0:
         raise ValueError("geomspace requires positive start and stop values")
-    return ndarray(_core.exp(_ensure(linspace(_core.log(_ensure(ndarray([start])))[0], _core.log(_ensure(ndarray([stop])))[0], num, endpoint))))
+    log_start = math.log(start)
+    log_stop = math.log(stop)
+    return exp(linspace(log_start, log_stop, num, endpoint))
 
 
 # ========== 索引函数 ==========
@@ -841,8 +876,12 @@ mod = _math_functions_module.mod
 greater = _math_functions_module.greater
 less = _math_functions_module.less
 equal = _math_functions_module.equal
+not_equal = _math_functions_module.not_equal
+greater_equal = _math_functions_module.greater_equal
+less_equal = _math_functions_module.less_equal
 logical_and = _math_functions_module.logical_and
 logical_or = _math_functions_module.logical_or
+logical_xor = _math_functions_module.logical_xor
 isclose = _math_functions_module.isclose
 allclose = _math_functions_module.allclose
 

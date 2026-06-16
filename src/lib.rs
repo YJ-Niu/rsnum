@@ -484,10 +484,22 @@ impl NdArray {
         self.data.mapv_inplace(|_| value);
     }
 
-    fn astype(&self, _dtype: &str) -> PyResult<NdArray> {
-        Ok(NdArray {
-            data: self.data.clone(),
-        })
+    fn astype(&self, dtype: &str) -> PyResult<NdArray> {
+        // rsnumpy 内部元素类型固定为 f64，这里只支持把 f64 截断为整数（int/int32/int64）。
+        // 对于 float* / 其它类型，保持 f64 行为（与旧版一致）。
+        let dt = dtype.to_lowercase();
+        let is_int = matches!(
+            dt.as_str(),
+            "int" | "i" | "int8" | "int16" | "int32" | "int64" | "intp" | "i8" | "i16" | "i32" | "i64"
+        );
+        if is_int {
+            let casted: Vec<f64> = self.data.iter().map(|v| v.trunc()).collect();
+            let arr = Array::from_shape_vec(IxDyn(self.data.shape()), casted)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            Ok(NdArray { data: arr })
+        } else {
+            Ok(NdArray { data: self.data.clone() })
+        }
     }
 
     fn __add__(&self, other: &Bound<'_, PyAny>) -> PyResult<NdArray> {
@@ -703,6 +715,7 @@ impl NdArray {
         Ok(diag.data.iter().sum())
     }
 
+    #[pyo3(signature = (*args))]
     fn item(&self, args: &Bound<'_, PyTuple>) -> PyResult<f64> {
         let n = args.len();
         if n == 0 {
@@ -1004,29 +1017,14 @@ impl NdArray {
             Some(ax) => {
                 let ndim = self.data.ndim();
                 let ax = if ax < 0 { (ndim as isize + ax) as usize } else { ax as usize };
-                let mut result_vec = Vec::new();
-                for row in self.data.axis_iter(Axis(ax)) {
-                    let min_val = row.iter().cloned().fold(f64::INFINITY, f64::min);
-                    result_vec.push(min_val);
-                }
-                let shape: Vec<usize> = self
+                let result: Array<f64, IxDyn> = self
                     .data
-                    .shape()
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| *i != ax)
-                    .map(|(_, &s)| s)
-                    .collect();
-                if shape.is_empty() {
-                    let val = result_vec.into_iter().fold(f64::INFINITY, f64::min);
-                    Ok(NdArray {
-                        data: Array::from_elem(IxDyn(&[]), val),
+                    .fold_axis(Axis(ax), f64::INFINITY, |acc, &v| {
+                        let a = *acc;
+                        if v < a { v } else { a }
                     })
-                } else {
-                    let arr = Array::from_shape_vec(IxDyn(&shape), result_vec)
-                        .map_err(|e| PyValueError::new_err(e.to_string()))?;
-                    Ok(NdArray { data: arr })
-                }
+                    .into_dyn();
+                Ok(NdArray { data: result })
             }
         }
     }
@@ -1043,29 +1041,14 @@ impl NdArray {
             Some(ax) => {
                 let ndim = self.data.ndim();
                 let ax = if ax < 0 { (ndim as isize + ax) as usize } else { ax as usize };
-                let mut result_vec = Vec::new();
-                for row in self.data.axis_iter(Axis(ax)) {
-                    let max_val = row.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                    result_vec.push(max_val);
-                }
-                let shape: Vec<usize> = self
+                let result: Array<f64, IxDyn> = self
                     .data
-                    .shape()
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| *i != ax)
-                    .map(|(_, &s)| s)
-                    .collect();
-                if shape.is_empty() {
-                    let val = result_vec.into_iter().fold(f64::NEG_INFINITY, f64::max);
-                    Ok(NdArray {
-                        data: Array::from_elem(IxDyn(&[]), val),
+                    .fold_axis(Axis(ax), f64::NEG_INFINITY, |acc, &v| {
+                        let a = *acc;
+                        if v > a { v } else { a }
                     })
-                } else {
-                    let arr = Array::from_shape_vec(IxDyn(&shape), result_vec)
-                        .map_err(|e| PyValueError::new_err(e.to_string()))?;
-                    Ok(NdArray { data: arr })
-                }
+                    .into_dyn();
+                Ok(NdArray { data: result })
             }
         }
     }
@@ -2395,9 +2378,10 @@ fn rot90(a: &NdArray, k: isize) -> PyResult<NdArray> {
         let rows = shape[0];
         let cols = shape[1];
         let mut new_data = vec![0.0; rows * cols];
-        for i in 0..rows {
-            for j in 0..cols {
-                new_data[j * rows + (rows - 1 - i)] = result[[i, j]];
+        // 逆时针旋转 90°：new[i][j] = old[j][cols-1-i]
+        for i in 0..cols {
+            for j in 0..rows {
+                new_data[i * rows + j] = result[[j, cols - 1 - i]];
             }
         }
         result = Array::from_shape_vec((cols, rows), new_data)

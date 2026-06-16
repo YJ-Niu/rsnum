@@ -71,8 +71,12 @@ class NdArrayMethods:
         改变数组形状和大小。
 
         参数:
-            new_shape: 新的形状。
+            new_shape: 新的形状（int, tuple 或 list）。
         """
+        if isinstance(new_shape, int):
+            new_shape = (new_shape,)
+        elif isinstance(new_shape, list):
+            new_shape = tuple(new_shape)
         arr._array.resize(new_shape)
     
     @staticmethod
@@ -336,7 +340,11 @@ class NdArrayMethods:
         参数:
             axis: 排序的轴。
         """
-        arr._array.sort(axis)
+        result = arr._array.sort(axis)
+        if hasattr(result, 'shape') and result.shape == arr.shape:
+            arr._array = result
+        else:
+            arr._array.data = result.data
     
     @staticmethod
     def diagonal(arr, offset=0, axis1=0, axis2=1):

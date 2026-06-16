@@ -136,9 +136,9 @@ def tile(A, reps):
 
 
 def repeat(a, repeats, axis=None):
-    """重复数组元素（使用 Python 层实现）。"""
+    """重复数组元素。"""
     arr = a if hasattr(a, '_array') else _wrap(a)
-    return arr.repeat(repeats)
+    return arr.repeat(repeats, axis)
 
 
 def flip(m, axis=None):
