@@ -1042,19 +1042,6 @@ def _flatten_data(data):
     return flat
 
 
-def _shape_of_nested(data):
-    """计算嵌套列表的形状。"""
-    shape = []
-    obj = data
-    while isinstance(obj, (list, tuple)):
-        shape.append(len(obj))
-        if obj:
-            obj = obj[0]
-        else:
-            break
-    return tuple(shape)
-
-
 def _is_rectangular(data):
     """检查嵌套列表是否为矩形（所有子列表长度相同）。"""
     if not isinstance(data, (list, tuple)):
