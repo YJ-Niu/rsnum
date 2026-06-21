@@ -3993,6 +3993,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(tuple_getitem, m)?)?;
     m.add_function(wrap_pyfunction!(indexing::getitem_multi, m)?)?;
     m.add_function(wrap_pyfunction!(indexing::getitem_scalar, m)?)?;
+    m.add_function(wrap_pyfunction!(indexing::setitem_multi, m)?)?;
+    m.add_function(wrap_pyfunction!(indexing::iscomplex_cpx, m)?)?;
     m.add_function(wrap_pyfunction!(savez_npz, m)?)?;
     m.add_function(wrap_pyfunction!(load_npz, m)?)?;
     m.add_function(wrap_pyfunction!(polyadd, m)?)?;

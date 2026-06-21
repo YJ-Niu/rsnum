@@ -447,7 +447,7 @@ class NdArrayMethods:
         """
         raw = arr._array.nonzero()
         # raw is list of lists (Vec<Vec<usize>>), convert to tuple of 1D arrays
-        result = []
-        for indices in raw:
-            result.append(ndarray(list(indices)))
+        result = [ndarray(list(indices)) for indices in raw]
+        # for indices in raw:
+        #     result.append(ndarray(list(indices)))
         return tuple(result)

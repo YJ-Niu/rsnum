@@ -244,32 +244,12 @@ class ndarray:
 
     def __setitem__(self, key, value):
         if isinstance(key, tuple):
-            val = ndarray(value)
-            flat_val = val.ravel().tolist()
-            strides = [1]
-            for s in reversed(self.shape[1:]):
-                strides.insert(0, strides[0] * s)
-            flat_key = []
-            indices = []
-            for i, k in enumerate(key):
-                if isinstance(k, slice):
-                    indices.append(range(k.start or 0, k.stop or self.shape[i], k.step or 1))
-                else:
-                    indices.append([k])
-
-            def assign(idx, dim):
-                if dim == len(key):
-                    flat_idx = builtins.sum(i * s for i, s in zip(idx, strides))
-                    flat_key.append(flat_idx)
-                else:
-                    for i in indices[dim]:
-                        assign(idx + [i], dim + 1)
-            assign([], 0)
-            flat_data = self.ravel().tolist()
-            for i, idx in enumerate(flat_key):
-                flat_data[idx] = flat_val[i % len(flat_val)]
-            new_arr = ndarray(flat_data).reshape(self.shape)
-            self._array = new_arr._array
+            # 将 Python ndarray 索引替换为底层 _array
+            key = tuple(k._array if isinstance(k, ndarray) else k for k in key)
+        elif not isinstance(key, str):
+            key = (key._array if isinstance(key, ndarray) else key,)
+        if isinstance(key, tuple):
+            _core.setitem_multi(self._array, key, list(self.shape), value)
         else:
             self._array[key] = value
 
@@ -1557,9 +1537,7 @@ def iscomplex(x):
     arr = ndarray(x)
     cpx = getattr(arr, '_complex_data', None)
     if cpx is not None:
-        # 从 _complex_data 检测虚部
-        mask = [1.0 if abs(v.imag) > 1e-12 else 0.0 for v in cpx]
-        return ndarray(mask)
+        return ndarray(_core.iscomplex_cpx(cpx))
     # 不是复数数组 → 全零
     shape = arr.shape
     return ndarray(_core.zeros(shape))

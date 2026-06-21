@@ -308,3 +308,102 @@ pub fn getitem_scalar(a: &NdArray, indices: Vec<isize>) -> PyResult<f64> {
     }
     Ok(*cur.first().unwrap_or(&0.0))
 }
+
+/// 计算每个轴上的步幅（相邻元素在扁平数组中的偏移）
+fn compute_strides(shape: &[usize]) -> Vec<usize> {
+    let mut strides = vec![1; shape.len()];
+    for i in (0..shape.len() - 1).rev() {
+        strides[i] = strides[i + 1] * shape[i + 1];
+    }
+    strides
+}
+
+/// 设置元素值：根据索引元组将值赋到指定位置
+///
+/// Python 调用: _core.setitem_multi(a, key_tuple, shape, value)
+#[pyfunction]
+pub fn setitem_multi(
+    a: &Bound<'_, NdArray>,
+    key: &Bound<'_, PyAny>,
+    shape: Vec<usize>,
+    value: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    let indices = parse_indices(key, &shape)?;
+
+    // 填充缺失维度
+    let mut filled_indices = indices;
+    let ndim = shape.len();
+    while filled_indices.len() < ndim {
+        let dim_size = shape[filled_indices.len()] as isize;
+        filled_indices.push(IndexDesc::Slice(0, dim_size, 1));
+    }
+
+    // 构建每个维度的索引列表
+    let dim_lists = build_dim_lists(&filled_indices);
+
+    // 计算步幅
+    let strides = compute_strides(&shape);
+
+    // 获取值 - 转换为 f64
+    let val: f64 = if let Ok(v) = value.extract::<f64>() {
+        v
+    } else if let Ok(v) = value.extract::<i32>() {
+        v as f64
+    } else if let Ok(v) = value.extract::<bool>() {
+        if v { 1.0 } else { 0.0 }
+    } else {
+        return Err(PyTypeError::new_err("Unsupported value type for assignment"));
+    };
+
+    // 生成所有索引组合的笛卡尔积，并写入值
+    fn assign_recursive(
+        strides: &[usize],
+        dim_lists: &[Vec<usize>],
+        depth: usize,
+        coords: &[usize],
+        data: &mut [f64],
+        val: f64,
+    ) {
+        if depth == dim_lists.len() {
+            let mut flat_idx = 0;
+            for (i, &c) in coords.iter().enumerate() {
+                flat_idx += c * strides[i];
+            }
+            if flat_idx < data.len() {
+                data[flat_idx] = val;
+            }
+            return;
+        }
+        for &val_idx in &dim_lists[depth] {
+            let mut new_coords = coords.to_vec();
+            new_coords.push(val_idx);
+            assign_recursive(strides, dim_lists, depth + 1, &new_coords, data, val);
+        }
+    }
+
+    let mut a_borrow = a.borrow_mut();
+    let flat_data = a_borrow.data.as_slice_memory_order_mut().unwrap();
+    assign_recursive(&strides, &dim_lists, 0, &[], flat_data, val);
+
+    Ok(())
+}
+
+/// 检测复数数组的虚部，返回布尔掩码
+#[pyfunction]
+pub fn iscomplex_cpx(data: Vec<Py<PyAny>>, py: Python<'_>) -> PyResult<NdArray> {
+    let mut mask = Vec::with_capacity(data.len());
+    for item in &data {
+        let obj = item.bind(py);
+        // 提取实部和虚部
+        // let real: f64 = obj.getattr("real")?.extract()?;
+        let imag: f64 = obj.getattr("imag")?.extract()?;
+        if imag.abs() > 1e-12 {
+            mask.push(1.0);
+        } else {
+            mask.push(0.0);
+        }
+    }
+    let arr = Array::from_shape_vec(IxDyn(&[data.len()]), mask)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(NdArray { data: arr })
+}
