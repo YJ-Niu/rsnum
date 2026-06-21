@@ -577,6 +577,179 @@ def _array_ops():
     return ao
 
 
+# ========== 类型代码映射 ==========
+
+_RS_DTYPE_CODES = {
+    # 有符号整数
+    'i1': 'int8', 'int8': 'int8',
+    'i2': 'int16', 'int16': 'int16',
+    'i4': 'int32', 'int32': 'int32',
+    'i8': 'int64', 'int64': 'int64',
+    # 无符号整数
+    'u1': 'uint8', 'uint8': 'uint8',
+    'u2': 'uint16', 'uint16': 'uint16',
+    'u4': 'uint32', 'uint32': 'uint32',
+    'u8': 'uint64', 'uint64': 'uint64',
+    # 浮点
+    'f2': 'float16', 'float16': 'float16',
+    'f4': 'float32', 'float32': 'float32',
+    'f8': 'float64', 'float64': 'float64', 'float': 'float64',
+    # 复数
+    'c8': 'complex64', 'c64': 'complex64', 'complex64': 'complex64',
+    'c16': 'complex128', 'c128': 'complex128', 'complex128': 'complex128', 'complex': 'complex128',
+    # 其他
+    'bool': 'bool', 'b1': 'bool',
+    'object': 'object', 'O': 'object',
+}
+
+_PY_TYPE_TO_RS = {
+    int: 'int64',
+    float: 'float64',
+    complex: 'complex128',
+    bool: 'bool',
+    bytes: 'bytes',
+    str: 'str',
+}
+
+# 运行时收集已知的 numpy 类型名称
+_numpy_type_names = {}
+
+
+def _init_numpy_types():
+    """尝试导入 numpy 并注册其标量类型名称。"""
+    global _numpy_type_names
+    try:
+        import numpy
+    except ImportError:
+        return
+    for name in dir(numpy):
+        if name.startswith('int') or name.startswith('uint') or name.startswith('float') \
+                or name.startswith('complex') or name == 'bool_' or name == 'bool':
+            _numpy_type_names[name] = name
+
+
+def _resolve_type_name(tp):
+    """将各种 dtype 输入解析为类型名字符串。"""
+    if isinstance(tp, str):
+        # 直接映射
+        lower = tp.lower()
+        if lower in _RS_DTYPE_CODES:
+            return _RS_DTYPE_CODES[lower]
+        return tp  # 未知字符串，原样返回
+    if isinstance(tp, DType):
+        return tp.name
+    if type(tp).__name__ == 'dtype' and hasattr(tp, 'name'):
+        return _RS_DTYPE_CODES.get(tp.name, tp.name)
+    # Python 内置类型
+    if tp in _PY_TYPE_TO_RS:
+        return _PY_TYPE_TO_RS[tp]
+    # 检查类名
+    name = getattr(tp, '__name__', None) or getattr(tp, 'name', str(tp))
+    # 先查已知的 numpy 类型名
+    if name in _numpy_type_names:
+        return _numpy_type_names[name]
+    # 再查代码表
+    if name in _RS_DTYPE_CODES:
+        return _RS_DTYPE_CODES[name]
+    # int_ / float_ 等 numpy 特殊名称
+    name_clean = name.rstrip('_')
+    if name_clean in _RS_DTYPE_CODES:
+        return _RS_DTYPE_CODES[name_clean]
+    return name
+
+
+# 类型名 → 类型码 逆向映射（用于结构化 dtype）
+_RS_NAME_TO_CODE = {}
+for _code, _name in _RS_DTYPE_CODES.items():
+    # 只保留短码映射，忽略 'int32': 'int32' 这样的自映射
+    if len(_code) <= 4 and _code not in ('float', 'complex', 'bool') and _code != _name:
+        _RS_NAME_TO_CODE[_name] = _code
+
+
+class DType:
+    """表示元素数据类型。"""
+
+    def __init__(self, name, fields=None):
+        self._name = name
+        self._fields = fields  # [(field_name, type_code), ...] 或 None
+
+    @property
+    def name(self):
+        return self._name
+
+    def _field_to_code(self, tp):
+        """将字段类型转换为短类型码。"""
+        if isinstance(tp, str):
+            return _RS_NAME_TO_CODE.get(_resolve_type_name(tp), tp)
+        resolved = _resolve_type_name(tp)
+        return _RS_NAME_TO_CODE.get(resolved, resolved)
+
+    def __str__(self):
+        if self._fields:
+            parts = [f"('{f[0]}', '{self._field_to_code(f[1])}')" for f in self._fields]
+            return "[" + ", ".join(parts) + "]"
+        return self._name
+
+    def __repr__(self):
+        if self._fields:
+            parts = [f"('{f[0]}', '{self._field_to_code(f[1])}')" for f in self._fields]
+            return "dtype([" + ", ".join(parts) + "])"
+        return f"dtype('{self._name}')"
+
+    def __eq__(self, other):
+        if isinstance(other, DType):
+            if self._fields is not None or other._fields is not None:
+                return self._fields == other._fields
+            return self._name == other._name
+        if isinstance(other, str):
+            return self._name == other
+        return NotImplemented
+
+
+# 立即初始化 numpy 类型名称
+_init_numpy_types()
+
+
+def dtype(obj):
+    """创建 dtype 对象。
+
+    >>> dt = dtype('i4')
+    >>> print(dt)
+    int32
+
+    >>> dt = dtype([('age', np.int8)])
+    >>> print(dt)
+    [('age', 'i1')]
+    """
+    if isinstance(obj, (list, tuple)):
+        # 结构化 dtype
+        fields = []
+        for item in obj:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                fields.append((item[0], item[1]))
+        if fields:
+            return DType("void", fields=fields)
+    name = _resolve_type_name(obj)
+    return DType(name)
+
+
+# ========== 标量类型别名 ==========
+
+int8 = type('int8', (), {})
+int16 = type('int16', (), {})
+int32 = type('int32', (), {})
+int64 = type('int64', (), {})
+uint8 = type('uint8', (), {})
+uint16 = type('uint16', (), {})
+uint32 = type('uint32', (), {})
+uint64 = type('uint64', (), {})
+float16 = type('float16', (), {})
+float32 = type('float32', (), {})
+float64 = type('float64', (), {})
+complex64 = type('complex64', (), {})
+complex128 = type('complex128', (), {})
+
+
 # ========== 构造/工厂函数 ==========
 
 def array(data, dtype=None, copy=True, order='K', subok=False, ndmin=0):
@@ -612,9 +785,11 @@ def copy(a, order='K'):
 
 
 def _resolve_dtype(dtype):
-    """解析 dtype 字符串/Types 为内部表示。"""
+    """解析 dtype 字符串/Types/DType 为内部表示。"""
     if dtype is None:
         return "float64"
+    if isinstance(dtype, DType):
+        return dtype.name
     dt_str = dtype if isinstance(dtype, str) else dtype.__name__
     if dt_str in ("complex", "complex128", "complex64", "cfloat", "cdouble"):
         return "complex128"
@@ -677,7 +852,6 @@ def eye(N, M=None, k=0, dtype=None, order='C'):
 
 def identity(n, dtype=None):
     """返回单位矩阵。"""
-    _dtype = _resolve_dtype(dtype)
     return eye(n, dtype=dtype)
 
 
