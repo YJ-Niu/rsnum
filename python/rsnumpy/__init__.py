@@ -526,7 +526,11 @@ def _array_ops():
 
 def array(data, dtype=None, copy=True, order='K', subok=False, ndmin=0):
     """创建数组。"""
-    return ndarray(data)
+    arr = ndarray(data)
+    if ndmin > arr.ndim:
+        new_shape = (1,) * (ndmin - arr.ndim) + arr.shape
+        arr = ndarray._wrap(arr._array.reshape(new_shape))
+    return arr
 
 
 def asarray(a, dtype=None, order=None):
