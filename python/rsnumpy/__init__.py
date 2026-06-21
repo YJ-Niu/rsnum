@@ -100,7 +100,7 @@ class ndarray:
     """
 
     def __init__(self, data, _dtype="float64", _fields=None, _raw_data=None):
-        if isinstance(data, ndarray):
+        if _is_ndarray(data):
             self._array = data._array
             self._dtype = data._dtype
             self._fields = getattr(data, '_fields', None)
@@ -188,14 +188,20 @@ class ndarray:
         return len(self._array)
 
     def tolist(self):
-        """转换为 Python 列表。"""
+        """转换为 Python 列表，元素类型与 _dtype 一致。"""
         raw = getattr(self, '_raw_data', None)
         if raw is not None:
             return raw
         cpx = getattr(self, '_complex_data', None)
         if cpx is not None:
             return list(cpx)
-        return self._array.tolist()
+        dt = getattr(self, '_dtype', 'float64')
+        raw_list = self._array.tolist()
+        if dt == 'int64':
+            return _convert_nested(raw_list, int)
+        if dt == 'bool':
+            return _convert_nested(raw_list, bool)
+        return raw_list
 
     def __bool__(self):
         if self.ndim == 0:
@@ -215,7 +221,7 @@ class ndarray:
                 return ndarray._wrap(self._array, self._dtype, _fields=None)
         # 复数数组的布尔索引
         cpx = getattr(self, '_complex_data', None)
-        if isinstance(key, ndarray) and cpx is not None:
+        if _is_ndarray(key) and cpx is not None:
             mask = key.tolist()
             filtered = [v for v, m in zip(cpx, mask) if m > 0.5]
             return ndarray(filtered)
@@ -264,7 +270,7 @@ class ndarray:
             self._array[key] = value
 
     def __add__(self, other):
-        if isinstance(other, ndarray):
+        if _is_ndarray(other):
             return _wrap_result(self._array + other._array, self._dtype)
         return _wrap_result(self._array + other, self._dtype)
 
@@ -272,7 +278,7 @@ class ndarray:
         return _wrap_result(other + self._array, self._dtype)
 
     def __sub__(self, other):
-        if isinstance(other, ndarray):
+        if _is_ndarray(other):
             return _wrap_result(self._array - other._array, self._dtype)
         return _wrap_result(self._array - other, self._dtype)
 
@@ -280,7 +286,7 @@ class ndarray:
         return _wrap_result(other - self._array, self._dtype)
 
     def __mul__(self, other):
-        if isinstance(other, ndarray):
+        if _is_ndarray(other):
             return _wrap_result(self._array * other._array, self._dtype)
         return _wrap_result(self._array * other, self._dtype)
 
@@ -288,7 +294,7 @@ class ndarray:
         return _wrap_result(other * self._array, self._dtype)
 
     def __truediv__(self, other):
-        if isinstance(other, ndarray):
+        if _is_ndarray(other):
             return _wrap_result(self._array / other._array, self._dtype)
         return _wrap_result(self._array / other, self._dtype)
 
@@ -296,42 +302,42 @@ class ndarray:
         return _wrap_result(other / self._array, self._dtype)
 
     def __matmul__(self, other):
-        if isinstance(other, ndarray):
+        if _is_ndarray(other):
             return _wrap_result(_core.linalg.matmul(self._array, other._array), self._dtype)
         return _wrap_result(_core.linalg.matmul(self._array, other), self._dtype)
 
     def __pow__(self, other):
-        if isinstance(other, ndarray):
+        if _is_ndarray(other):
             return _wrap_result(_core.power(self._array, other._array), self._dtype)
         return _wrap_result(_core.power(self._array, _core.ndarray([other])), self._dtype)
 
     def __eq__(self, other):
-        if isinstance(other, ndarray):
+        if _is_ndarray(other):
             return _wrap_result(self._array.__eq__(other._array), self._dtype)
         return _wrap_result(self._array.__eq__(other), self._dtype)
 
     def __ne__(self, other):
-        if isinstance(other, ndarray):
+        if _is_ndarray(other):
             return _wrap_result(self._array.__ne__(other._array), self._dtype)
         return _wrap_result(self._array.__ne__(other), self._dtype)
 
     def __lt__(self, other):
-        if isinstance(other, ndarray):
+        if _is_ndarray(other):
             return _wrap_result(self._array.__lt__(other._array), self._dtype)
         return _wrap_result(self._array.__lt__(other), self._dtype)
 
     def __le__(self, other):
-        if isinstance(other, ndarray):
+        if _is_ndarray(other):
             return _wrap_result(self._array.__le__(other._array), self._dtype)
         return _wrap_result(self._array.__le__(other), self._dtype)
 
     def __gt__(self, other):
-        if isinstance(other, ndarray):
+        if _is_ndarray(other):
             return _wrap_result(self._array.__gt__(other._array), self._dtype)
         return _wrap_result(self._array.__gt__(other), self._dtype)
 
     def __ge__(self, other):
-        if isinstance(other, ndarray):
+        if _is_ndarray(other):
             return _wrap_result(self._array.__ge__(other._array), self._dtype)
         return _wrap_result(self._array.__ge__(other), self._dtype)
 
@@ -469,8 +475,27 @@ class ndarray:
         """返回数组的一维副本。"""
         return _ndarray_methods().flatten(self, order)
 
-    def copy(self):
-        """返回数组的副本。"""
+    def copy(self, order='K'):
+        """返回数组的副本，支持 'C'（行序）、'F'（列序）内存布局。"""
+        if order == 'F':
+            shape = list(self.shape)
+            ndim = len(shape)
+            flat = self._array.flatten().tolist()
+            strides = [1] * ndim
+            for i in range(ndim - 2, -1, -1):
+                strides[i] = strides[i + 1] * shape[i + 1]
+            f_order = []
+
+            def _walk(dim, pos):
+                if dim < 0:
+                    f_order.append(pos)
+                else:
+                    for v in range(shape[dim]):
+                        _walk(dim - 1, pos + v * strides[dim])
+            _walk(ndim - 1, 0)
+            reordered = [flat[ci] for ci in f_order]
+            result = _core.ndarray(reordered).reshape(shape)
+            return _wrap_result(result, self._dtype)
         return _wrap_result(self._array.copy(), self._dtype)
 
     def transpose(self, *axes):
@@ -638,11 +663,23 @@ def _ensure(x):
     """将列表/元组转换为 ndarray。"""
     if isinstance(x, (list, tuple)):
         return _core.ndarray(x)
-    elif hasattr(x, '_array'):
+    elif _is_ndarray(x):
         return x._array
     elif hasattr(x, '__class__') and x.__class__.__name__ == 'ndarray':
         return x
     return x
+
+
+def _is_ndarray(obj):
+    """检查对象是否为 rsnumpy ndarray（用 hasattr 避免类身份不一致问题）。"""
+    return hasattr(obj, '_array')
+
+
+def _convert_nested(data, converter):
+    """递归转换嵌套列表中的每个元素。"""
+    if isinstance(data, list):
+        return [_convert_nested(x, converter) for x in data]
+    return converter(data)
 
 
 def _ndarray_to_index_list(k):
@@ -1105,7 +1142,7 @@ def array(data, dtype=None, copy=True, order='K', subok=False, ndmin=0):
 
 def asarray(a, dtype=None, order=None):
     """转换输入为数组。"""
-    if isinstance(a, ndarray):
+    if _is_ndarray(a):
         return a
     if dtype is not None:
         dt_str = dtype if isinstance(dtype, str) else dtype.__name__
@@ -1130,7 +1167,7 @@ def asanyarray(a, dtype=None, order=None):
 
 def _to_ndarray(obj):
     """将任意数组类对象转换为 rsnumpy ndarray（不依赖第三方库）。"""
-    if isinstance(obj, ndarray):
+    if _is_ndarray(obj):
         return obj
     if hasattr(obj, 'tolist'):
         return ndarray(obj.tolist())
@@ -1471,7 +1508,7 @@ def fft(a, n=None, axis=-1):
 
 def ifft(a, n=None, axis=-1):
     """计算一维逆离散傅里叶变换。"""
-    if isinstance(a, ndarray):
+    if _is_ndarray(a):
         return _core.py_ifft_ndarray(a._array)
     return _core.py_ifft(a)
 
@@ -1484,7 +1521,7 @@ def rfft(a, n=None, axis=-1):
 
 def irfft(a, n=None, axis=-1):
     """计算 rfft 的逆变换。"""
-    if isinstance(a, ndarray):
+    if _is_ndarray(a):
         return _core.py_irfft_ndarray(a._array, n)
     return _core.py_irfft(a, n)
 
@@ -1499,6 +1536,53 @@ newaxis = None
 
 
 # ========== 判断函数 ==========
+
+def nditer(a, order='C'):
+    """创建数组元素的迭代器，逐个访问数组元素。
+
+    参数:
+        a: 输入数组
+        order: 遍历顺序，'C'（行序优先）或 'F'（列序优先）
+
+    >>> a = np.array([[0, 1, 2], [3, 4, 5]])
+    >>> for x in np.nditer(a):
+    ...     print(x, end=", ")
+    0, 1, 2, 3, 4, 5,
+    """
+    arr = ndarray(a)
+    # 先复制确保连续内存，避免转置等视图 flatten 时崩溃
+    flat_arr = arr.copy().flatten()
+    size = flat_arr.size
+    is_int = getattr(arr, '_dtype', 'float64') == 'int64'
+
+    if order == 'F' and arr.ndim > 1:
+        # Fortran-order: 按列序优先（首维最快）生成多维索引，转为 C-flat 索引
+        shape = arr.shape
+        ndim = len(shape)
+        # C-order strides: stride[i] = product(shape[i+1:])
+        c_strides = [1] * ndim
+        for i in range(ndim - 2, -1, -1):
+            c_strides[i] = c_strides[i + 1] * shape[i + 1]
+
+        # F-order 等同于最后一维最慢，首维最快
+        # 递归遍历 dim = ndim-1, ndim-2, ..., 0
+        def _iter_f_order(dim, coords):
+            if dim < 0:
+                # coords 是反向顺序 [last_dim, ..., first_dim]，需反转
+                idx = builtins.sum(c * s for c, s in zip(reversed(coords), c_strides))
+                if 0 <= idx < size:
+                    val = flat_arr[idx].item()
+                    yield int(val) if is_int else val
+            else:
+                for v in range(shape[dim]):
+                    yield from _iter_f_order(dim - 1, coords + [v])
+
+        yield from _iter_f_order(ndim - 1, [])
+    else:
+        # C-order: 行序优先（默认）
+        for i in range(size):
+            val = flat_arr[i].item()
+            yield int(val) if is_int else val
 
 def isnan(x):
     """逐元素检测是否为 NaN。"""
@@ -1672,6 +1756,7 @@ __all__ = [
     'histogram', 'histogram2d', 'histogramdd', 'digitize',
     'fft', 'ifft', 'rfft', 'irfft',
     'pi', 'e', 'euler_gamma', 'inf', 'nan', 'newaxis',
+    'nditer',
     'isnan', 'isinf', 'isfinite',
     'save', 'load', 'loadtxt', 'savetxt', 'savez',
     'Poly', 'polyval', 'polyfit', 'polyder', 'polyint', 'polyroots',

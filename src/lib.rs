@@ -527,8 +527,9 @@ impl NdArray {
     }
 
     fn flatten(&self) -> NdArray {
+        let flat: Vec<f64> = self.data.iter().copied().collect();
         NdArray {
-            data: self.data.clone().into_shape_with_order(IxDyn(&[self.data.len()])).unwrap(),
+            data: Array::from_shape_vec(IxDyn(&[flat.len()]), flat).unwrap(),
         }
     }
 

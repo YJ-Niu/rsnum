@@ -12,9 +12,10 @@ def _ensure(x):
 
 
 def _wrap(x):
-    from ..__init__ import ndarray
-    if isinstance(x, ndarray):
+    """包装/转换数组，避免类身份不一致问题。"""
+    if getattr(x, '__class__', None) and x.__class__.__name__ == 'ndarray':
         return x
+    from ..__init__ import ndarray
     return ndarray(x)
 
 

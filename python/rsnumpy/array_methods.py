@@ -102,11 +102,14 @@ class NdArrayMethods:
         返回:
             ndarray: 转置后的数组。
         """
+        dtype = getattr(arr, '_dtype', "float64")
+        fields = getattr(arr, '_fields', None)
+        raw = getattr(arr, '_raw_data', None)
         if len(axes) == 0:
             result = arr._array.T
         else:
             result = _core.transpose(arr._array)
-        return _wrap_result(result)
+        return ndarray._wrap(result, _dtype=dtype, _fields=fields, _raw_data=raw)
     
     @staticmethod
     def swapaxes(arr, axis1, axis2):
