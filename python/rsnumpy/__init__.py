@@ -48,33 +48,43 @@ class ndarray:
         imag: 数组的虚部。
     """
 
-    def __init__(self, data, _dtype="float64"):
+    def __init__(self, data, _dtype="float64", _fields=None):
         if isinstance(data, ndarray):
             self._array = data._array
             self._dtype = data._dtype
+            self._fields = getattr(data, '_fields', None)
         elif hasattr(data, '__class__') and data.__class__.__name__ == 'ndarray':
             self._array = data
             self._dtype = _dtype
+            self._fields = _fields
         else:
             self._array = _core.ndarray(data)
             self._dtype = _dtype
+            self._fields = _fields
 
     @staticmethod
-    def _wrap(raw_array, _dtype="float64"):
+    def _wrap(raw_array, _dtype="float64", _fields=None):
         """包装原始 Rust ndarray 到 Python 类。"""
         obj = ndarray.__new__(ndarray)
         obj._array = raw_array
         obj._dtype = _dtype
+        obj._fields = _fields
         return obj
 
     def __repr__(self):
+        fields = getattr(self, '_fields', None)
+        if fields:
+            return _format_structured_repr(self)
         if getattr(self, '_dtype', "float64") == "complex128":
-            return _format_complex_repr(self._array)
+            return _core._format_complex_repr(self._array)
         return repr(self._array)
 
     def __str__(self):
+        fields = getattr(self, '_fields', None)
+        if fields:
+            return _format_structured_str(self)
         if getattr(self, '_dtype', "float64") == "complex128":
-            return _format_complex_str(self._array)
+            return _core._format_complex_str(self._array)
         return str(self._array)
 
     def __len__(self):
@@ -522,53 +532,6 @@ def _stat_funcs():
     """延迟导入 statistics 模块。"""
     from . import statistics as st
     return st
-
-
-def _format_complex_val(val):
-    """格式化单个复数（实部为 val，虚部为 0）。"""
-    if val == 0:
-        return "0.+0.j"
-    # 实部：整数显示不带点，浮点显示带点
-    real_str = str(int(val)) + "." if val == int(val) else str(val)
-    return f"{real_str}+0.j"
-
-
-def _format_complex_flat(flat, shape):
-    """递归格式化复杂数组。"""
-    if not shape:
-        return _format_complex_val(flat[0]) if flat else "0.+0.j"
-    if len(shape) == 1:
-        parts = [_format_complex_val(v) for v in flat]
-        return "[" + " ".join(parts) + "]"
-    n = shape[0]
-    sub_size = 1
-    for s in shape[1:]:
-        sub_size *= s
-    rows = []
-    for i in range(n):
-        sub = flat[i * sub_size:(i + 1) * sub_size]
-        rows.append(_format_complex_flat(sub, shape[1:]))
-    return "[" + "\n ".join(rows) + "]"
-
-
-def _format_complex_repr(arr):
-    """__repr__ 用于 complex 数组。"""
-    flat = _flatten_core(arr)
-    shape = arr.shape
-    inner = _format_complex_flat(flat, list(shape))
-    return f"rsnumpy.ndarray({inner}) dtype=complex128"
-
-
-def _format_complex_str(arr):
-    """__str__ 用于 complex 数组。"""
-    flat = _flatten_core(arr)
-    shape = arr.shape
-    return _format_complex_flat(flat, list(shape))
-
-
-def _flatten_core(arr):
-    """将 Rust ndarray 展平为 Python 列表。"""
-    return arr.tolist() if hasattr(arr, 'tolist') else list(arr)
 
 
 def _array_ops():

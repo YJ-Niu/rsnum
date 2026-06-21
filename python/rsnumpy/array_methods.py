@@ -43,25 +43,11 @@ class NdArrayMethods:
             ndarray: 重新塑形后的数组。
         """
         if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
-            shape = tuple(shape[0])
+            shape = shape[0]
         else:
             shape = shape
         
-        if -1 in shape:
-            total_size = arr.size
-            known_size = 1
-            unknown_idx = -1
-            for i, s in enumerate(shape):
-                if s == -1:
-                    unknown_idx = i
-                elif s > 0:
-                    known_size *= s
-            
-            if unknown_idx != -1:
-                new_shape = list(shape)
-                new_shape[unknown_idx] = total_size // known_size
-                shape = tuple(new_shape)
-        
+        # Rust 端处理 -1 和形状验证
         result = arr._array.reshape(shape)
         return _wrap_result(result)
     

@@ -417,11 +417,70 @@ impl NdArray {
     }
 
     fn reshape(&self, shape: &Bound<'_, PyAny>) -> PyResult<NdArray> {
-        let s = shape_to_vec(shape)?;
+        // 使用 isize 解析，支持 -1
+        let s: Vec<isize> = if let Ok(tup) = shape.cast::<PyTuple>() {
+            let mut result = Vec::new();
+            for item in tup.iter() {
+                result.push(item.extract::<isize>()?);
+            }
+            result
+        } else if let Ok(val) = shape.extract::<isize>() {
+            vec![val]
+        } else if let Ok(list) = shape.cast::<PyList>() {
+            let mut result = Vec::new();
+            for item in list.iter() {
+                result.push(item.extract::<isize>()?);
+            }
+            result
+        } else {
+            return Err(PyTypeError::new_err("Shape must be a tuple, list, or integer"));
+        };
+
+        let total = self.data.len() as isize;
+
+        // 处理 -1（自动计算维度）
+        let unknown_count = s.iter().filter(|&&v| v == -1).count();
+        if unknown_count > 1 {
+            return Err(PyValueError::new_err("can only specify one unknown dimension"));
+        }
+
+        let known: isize = s.iter().filter(|&&v| v > 0).product();
+        let out: Vec<usize> = if unknown_count == 1 {
+            if known == 0 || total % known != 0 {
+                return Err(PyValueError::new_err(format!(
+                    "cannot reshape array of size {} into shape {:?}", total, s
+                )));
+            }
+            s.iter().map(|&v| -> PyResult<usize> {
+                if v == -1 {
+                    Ok((total / known) as usize)
+                } else if v <= 0 {
+                    Err(PyValueError::new_err(format!("{} is not a valid dimension size", v)))
+                } else {
+                    Ok(v as usize)
+                }
+            }).collect::<PyResult<Vec<_>>>()?
+        } else {
+            s.iter().map(|&v| -> PyResult<usize> {
+                if v <= 0 {
+                    Err(PyValueError::new_err(format!("{} is not a valid dimension size", v)))
+                } else {
+                    Ok(v as usize)
+                }
+            }).collect::<PyResult<Vec<_>>>()?
+        };
+
+        // 验证总元素数一致
+        if out.iter().product::<usize>() != total as usize {
+            return Err(PyValueError::new_err(format!(
+                "cannot reshape array of size {} into shape {:?}", total, s
+            )));
+        }
+
         let arr = self
             .data
             .clone()
-            .into_shape_with_order(IxDyn(&s))
+            .into_shape_with_order(IxDyn(&out))
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(NdArray { data: arr })
     }
@@ -3500,6 +3559,70 @@ fn argmin_axis(a: &NdArray, axis: Option<i32>) -> PyResult<NdArray> {
     Ok(NdArray { data: arr })
 }
 
+// ========== 复数格式化 ==========
+
+fn format_complex_scalar(val: f64) -> String {
+    if val.is_nan() {
+        return "nan+nanj".to_string();
+    }
+    if val.is_infinite() {
+        let sign = if val > 0.0 { "" } else { "-" };
+        return format!("{}inf+0.j", sign);
+    }
+    // 整数不显示小数点
+    let real_str = if val == val.floor() && val.is_finite() && val.abs() < 1e16 {
+        let v = val as i64;
+        if v as f64 == val {
+            format!("{}.", v)
+        } else {
+            format!("{}", val)
+        }
+    } else {
+        format!("{}", val)
+    };
+    format!("{}+0.j", real_str)
+}
+
+fn format_complex_array(arr: &Array<f64, IxDyn>) -> String {
+    if arr.ndim() == 0 {
+        return format_complex_scalar(arr.iter().next().copied().unwrap_or(0.0_f64));
+    }
+    if arr.ndim() == 1 {
+        let mut s = String::from("[");
+        for (i, val) in arr.iter().enumerate() {
+            if i > 0 {
+                s.push_str(" ");
+            }
+            s.push_str(&format_complex_scalar(*val));
+        }
+        s.push(']');
+        return s;
+    }
+    let mut s = String::from("[");
+    let n = arr.shape()[0];
+    for i in 0..n {
+        if i > 0 {
+            s.push_str("\n ");
+        }
+        let sub = arr.index_axis(Axis(0), i).to_owned().into_dyn();
+        let row_str = format_complex_array(&sub);
+        s.push_str(&row_str);
+    }
+    s.push_str("]");
+    s
+}
+
+#[pyfunction]
+fn _format_complex_repr(arr: &NdArray) -> String {
+    let inner = format_complex_array(&arr.data);
+    format!("rsnumpy.ndarray({}) dtype=complex128", inner)
+}
+
+#[pyfunction]
+fn _format_complex_str(arr: &NdArray) -> String {
+    format_complex_array(&arr.data)
+}
+
 // ===== Module Initialization =====
 
 #[pymodule]
@@ -3649,6 +3772,9 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(polymul, m)?)?;
     m.add_function(wrap_pyfunction!(argmax_axis, m)?)?;
     m.add_function(wrap_pyfunction!(argmin_axis, m)?)?;
+
+    m.add_function(wrap_pyfunction!(_format_complex_repr, m)?)?;
+    m.add_function(wrap_pyfunction!(_format_complex_str, m)?)?;
 
     m.add_function(wrap_pyfunction!(fft::py_fft, m)?)?;
     m.add_function(wrap_pyfunction!(fft::py_ifft, m)?)?;
