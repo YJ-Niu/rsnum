@@ -20,7 +20,13 @@ enum IndexDesc {
 
 /// 解析 Python 索引对象，返回 IndexDesc
 fn parse_single_index(item: &Bound<'_, PyAny>, dim_size: isize) -> PyResult<IndexDesc> {
-    // 先尝试解析为 Python 列表（布尔列表优先于 NdArray 构造）
+    // 先尝试解析为整数（必须在 ndarray 之前，否则 from_py_object 会拦截）
+    if let Ok(idx) = item.extract::<isize>() {
+        let actual_idx = if idx < 0 { (dim_size + idx) as usize } else { idx as usize };
+        return Ok(IndexDesc::Int(actual_idx));
+    }
+
+    // 尝试解析为 Python 列表（布尔列表优先于 NdArray 构造）
     if let Ok(list) = item.cast::<PyList>() {
         if list.is_empty() {
             return Ok(IndexDesc::Fancy(vec![]));
@@ -89,12 +95,6 @@ fn parse_single_index(item: &Bound<'_, PyAny>, dim_size: isize) -> PyResult<Inde
         let actual_stop = if stop < 0 { (dim_size + stop).max(0) } else { stop.min(dim_size) };
 
         return Ok(IndexDesc::Slice(actual_start, actual_stop, step));
-    }
-
-    // 尝试解析为整数
-    if let Ok(idx) = item.extract::<isize>() {
-        let actual_idx = if idx < 0 { (dim_size + idx) as usize } else { idx as usize };
-        return Ok(IndexDesc::Int(actual_idx));
     }
 
     // 以上都不匹配
@@ -239,7 +239,13 @@ fn slice_and_int_index(a: &Array<f64, IxDyn>, indices: &[IndexDesc]) -> PyResult
                 cur = cur.slice_axis(dim_axis, s).into_owned().into_dyn();
             }
             IndexDesc::Int(i) => {
-                cur = cur.index_axis(ndarray::Axis(dim), *i).to_owned().into_dyn();
+                let cur_ndim = cur.ndim();
+                let ax = dim.min(cur_ndim.saturating_sub(1));
+                let dim_size = cur.shape()[ax];
+                if *i >= dim_size {
+                    return Err(PyIndexError::new_err("Index out of bounds"));
+                }
+                cur = cur.index_axis(ndarray::Axis(ax), *i).to_owned().into_dyn();
             }
             _ => unreachable!(),
         }

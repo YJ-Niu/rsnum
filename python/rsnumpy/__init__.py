@@ -444,6 +444,11 @@ class ndarray:
         return _ndarray_methods().transpose(self)
 
     @property
+    def flat(self):
+        """返回数组元素的扁平迭代器，逐个访问每个元素。"""
+        return _NdFlatIter(self)
+
+    @property
     def real(self):
         """数组的实部。"""
         return self.copy()
@@ -1537,23 +1542,173 @@ newaxis = None
 
 # ========== 判断函数 ==========
 
-def nditer(a, order='C'):
+class _NdFlatIter:
+    """ndarray.flat 的扁平迭代器，逐元素访问数组。"""
+    def __init__(self, arr):
+        self._arr = arr
+        self._flat = arr._array.flatten()
+        self._size = self._flat.size
+        self._idx = 0
+        self._is_int = getattr(arr, '_dtype', 'float64') == 'int64'
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._idx >= self._size:
+            raise StopIteration
+        val = self._flat[self._idx]
+        self._idx += 1
+        return int(val) if self._is_int else float(val)
+
+
+class _NdIterElement:
+    """nditer 的可写元素包装，支持 op_flags=['readwrite'] 时修改原数组。"""
+    __slots__ = ('_arr', '_idx', '_val')
+
+    def __init__(self, arr, idx, val):
+        self._arr = arr
+        self._idx = idx
+        self._val = val
+
+    def __repr__(self):
+        return repr(self._val)
+
+    def __float__(self):
+        return float(self._val)
+
+    def __int__(self):
+        return int(self._val)
+
+    def __bool__(self):
+        return bool(self._val)
+
+    def __eq__(self, other):
+        return self._val == other
+
+    def __ne__(self, other):
+        return self._val != other
+
+    def __lt__(self, other):
+        return self._val < other
+
+    def __le__(self, other):
+        return self._val <= other
+
+    def __gt__(self, other):
+        return self._val > other
+
+    def __ge__(self, other):
+        return self._val >= other
+
+    def __add__(self, other):
+        return self._val + other
+
+    def __radd__(self, other):
+        return other + self._val
+
+    def __sub__(self, other):
+        return self._val - other
+
+    def __rsub__(self, other):
+        return other - self._val
+
+    def __mul__(self, other):
+        return self._val * other
+
+    def __rmul__(self, other):
+        return other * self._val
+
+    def __truediv__(self, other):
+        return self._val / other
+
+    def __rtruediv__(self, other):
+        return other / self._val
+
+    def __neg__(self):
+        return -self._val
+
+    def __abs__(self):
+        return abs(self._val)
+
+    def __getitem__(self, key):
+        return self._val
+
+    def __setitem__(self, key, value):
+        self._val = float(value)
+        self._arr.put([self._idx], [self._val])
+
+
+def nditer(a, order='C', op_flags=None, flags=None):
     """创建数组元素的迭代器，逐个访问数组元素。
 
     参数:
-        a: 输入数组
+        a: 输入数组或数组列表（广播迭代）
         order: 遍历顺序，'C'（行序优先）或 'F'（列序优先）
+        op_flags: 操作标志列表，如 ['readwrite'] 表示可读写
+        flags: 迭代器标志，如 ['external_loop'] 表示返回一维数组块而非标量
 
     >>> a = np.array([[0, 1, 2], [3, 4, 5]])
     >>> for x in np.nditer(a):
     ...     print(x, end=", ")
     0, 1, 2, 3, 4, 5,
     """
+    # 多数组广播迭代
+    if isinstance(a, (list, tuple)):
+        arrays = [ndarray(x) for x in a]
+        # 计算广播形状：每个维度取最大值
+        all_shapes = [x.shape for x in arrays]
+        max_ndim = builtins.max(len(s) for s in all_shapes)
+        padded = []
+        for s in all_shapes:
+            pad = [1] * (max_ndim - len(s)) + list(s)
+            padded.append(pad)
+        bcast_shape = tuple(builtins.max(p[i] for p in padded) for i in range(max_ndim))
+        # 广播每个数组到统一形状
+        bcast_arrays = []
+        for arr in arrays:
+            if arr.shape == bcast_shape:
+                bcast_arrays.append(arr)
+            else:
+                bcast_arrays.append(ndarray(_core.broadcast_to(arr._array, bcast_shape)))
+        # 展平并迭代
+        flats = [x._array.flatten().tolist() for x in bcast_arrays]
+        is_ints = [getattr(x, '_dtype', 'float64') == 'int64' for x in bcast_arrays]
+        for i in range(len(flats[0])):
+            yield tuple(int(f[i]) if is_ints[j] else f[i] for j, f in enumerate(flats))
+        return
+
     arr = ndarray(a)
-    # 先复制确保连续内存，避免转置等视图 flatten 时崩溃
+    ext_loop = flags and 'external_loop' in flags
+
+    # external_loop: 按 chunk 返回一维数组
+    if ext_loop:
+        if arr.ndim <= 1:
+            yield arr
+            return
+        if order == 'F':
+            # F-order: 每次返回一列（最后一维）
+            ncols = arr.shape[-1]
+            for col in range(ncols):
+                key = tuple([slice(None)] * (arr.ndim - 1) + [col])
+                col_arr = arr[key]
+                yield ndarray(col_arr)
+        else:
+            # C-order: 每次返回一行（第一维）
+            for i in range(arr.shape[0]):
+                yield ndarray(arr[i])
+        return
+
+    # 原有逐元素逻辑
     flat_arr = arr.copy().flatten()
     size = flat_arr.size
     is_int = getattr(arr, '_dtype', 'float64') == 'int64'
+    readwrite = op_flags and 'readwrite' in op_flags
+
+    def _to_val(v, ci):
+        if readwrite:
+            return _NdIterElement(arr, ci, int(v) if is_int else v)
+        return int(v) if is_int else v
 
     if order == 'F' and arr.ndim > 1:
         # Fortran-order: 按列序优先（首维最快）生成多维索引，转为 C-flat 索引
@@ -1572,7 +1727,7 @@ def nditer(a, order='C'):
                 idx = builtins.sum(c * s for c, s in zip(reversed(coords), c_strides))
                 if 0 <= idx < size:
                     val = flat_arr[idx].item()
-                    yield int(val) if is_int else val
+                    yield _to_val(val, idx)
             else:
                 for v in range(shape[dim]):
                     yield from _iter_f_order(dim - 1, coords + [v])
@@ -1582,7 +1737,7 @@ def nditer(a, order='C'):
         # C-order: 行序优先（默认）
         for i in range(size):
             val = flat_arr[i].item()
-            yield int(val) if is_int else val
+            yield _to_val(val, i)
 
 def isnan(x):
     """逐元素检测是否为 NaN。"""

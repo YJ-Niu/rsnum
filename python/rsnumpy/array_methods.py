@@ -8,10 +8,10 @@ import rsnumpy._core as _core
 from .__init__ import ndarray, _ensure
 
 
-def _wrap_result(result):
+def _wrap_result(result, dtype="float64"):
     """包装结果为 ndarray 对象"""
     if hasattr(result, '__class__') and result.__class__.__name__ == 'ndarray':
-        return ndarray._wrap(result)
+        return ndarray._wrap(result, _dtype=dtype)
     return result
 
 
@@ -81,15 +81,34 @@ class NdArrayMethods:
     @staticmethod
     def flatten(arr, order='C'):
         """
-        返回数组的一维副本。
+        展平数组为一维。
 
         参数:
-            order: 展平顺序。
+            order: 'C'（行优先）、'F'（列优先）、'A'（原顺序）、'K'（内存顺序）
 
         返回:
             ndarray: 展平后的数组副本。
         """
-        return _wrap_result(arr._array.flatten())
+        dtype = getattr(arr, '_dtype', "float64")
+        if order == 'F' and arr.ndim > 1:
+            # F-order: 按列序收集元素
+            shape = list(arr.shape)
+            ndim = len(shape)
+            strides = [1] * ndim
+            for i in range(ndim - 2, -1, -1):
+                strides[i] = strides[i + 1] * shape[i + 1]
+            flat_c = arr._array.flatten().tolist()
+            flat_f = []
+
+            def _walk(dim, pos):
+                if dim < 0:
+                    flat_f.append(flat_c[pos])
+                else:
+                    for v in range(shape[dim]):
+                        _walk(dim - 1, pos + v * strides[dim])
+            _walk(ndim - 1, 0)
+            return _wrap_result(_core.ndarray(flat_f).reshape([-1]), dtype)
+        return _wrap_result(arr._array.flatten(), dtype)
     
     @staticmethod
     def transpose(arr, *axes):
