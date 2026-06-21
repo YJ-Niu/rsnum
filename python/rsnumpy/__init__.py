@@ -311,7 +311,7 @@ class ndarray:
     @property
     def dtype(self):
         """返回元素数据类型。"""
-        return getattr(self, '_dtype', "float64")
+        return DType(getattr(self, '_dtype', "float64"))
 
     @property
     def itemsize(self):
@@ -541,6 +541,12 @@ def _wrap_result(result, dtype="float64"):
     if hasattr(result, '__class__') and result.__class__.__name__ == 'ndarray':
         return ndarray._wrap(result, _dtype=dtype)
     return result
+
+
+def _wrap_with_source(result, source):
+    """用源数组的 dtype 包装结果。"""
+    dtype = getattr(source, '_dtype', "float64")
+    return _wrap_result(result, dtype)
 
 
 def _scalar(x):
@@ -776,7 +782,11 @@ class DType:
             return self._name == other._name
         if isinstance(other, str):
             return self._name == other
-        return NotImplemented
+        # 对外部类型（如 numpy dtype）通过字符串比较
+        try:
+            return self._name == str(other)
+        except Exception:
+            return NotImplemented
 
 
 # 立即初始化 numpy 类型名称
@@ -864,6 +874,24 @@ def asanyarray(a, dtype=None, order=None):
     return asarray(a, dtype, order)
 
 
+def _to_ndarray(obj):
+    """将任意数组类对象转换为 rsnumpy ndarray（不依赖第三方库）。"""
+    if isinstance(obj, ndarray):
+        return obj
+    if hasattr(obj, 'tolist'):
+        return ndarray(obj.tolist())
+    return ndarray(obj)
+
+
+def array_equal(a, b):
+    """判断两个数组是否形状和元素完全相同。"""
+    a = _to_ndarray(a)
+    b = _to_ndarray(b)
+    if a.shape != b.shape:
+        return False
+    return bool(_core.array_equal(a._array, b._array))
+
+
 def copy(a, order='K'):
     """返回数组副本。"""
     return ndarray(a).copy()
@@ -879,6 +907,14 @@ def _resolve_dtype(dtype):
     if dt_str in ("complex", "complex128", "complex64", "cfloat", "cdouble"):
         return "complex128"
     return "float64"
+
+
+def _infer_int_dtype(*args):
+    """推断参数中是否全部为整数，决定使用 int64 还是 float64。"""
+    for a in args:
+        if not isinstance(a, (int, bool)):
+            return "float64"
+    return "int64"
 
 
 def zeros(shape, dtype=None, order='C'):
@@ -945,7 +981,8 @@ def arange(start=0, stop=None, step=1, dtype=None):
     if stop is None:
         stop = start
         start = 0
-    return ndarray(_core.arange(start, stop, step))
+    _dtype = _resolve_dtype(dtype) if dtype is not None else _infer_int_dtype(start, stop, step)
+    return ndarray(_core.arange(start, stop, step), _dtype=_dtype)
 
 
 def linspace(start, stop, num=50, endpoint=True, retstep=False, dtype=None, axis=0):

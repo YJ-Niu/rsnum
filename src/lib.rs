@@ -99,7 +99,14 @@ fn to_python_list<'a>(py: Python<'a>, arr: &ArrayViewD<'_, f64>) -> PyResult<Bou
     Ok(list.into_any())
 }
 
-fn format_array_repr(arr: &Array<f64, IxDyn>, _prefix: &str) -> String {
+fn compute_max_width(arr: &Array<f64, IxDyn>) -> usize {
+    arr.iter()
+        .map(|v| format_scalar(*v).len())
+        .max()
+        .unwrap_or(1)
+}
+
+fn format_array_repr_inner(arr: &Array<f64, IxDyn>, _prefix: &str, pad_width: usize) -> String {
     if arr.ndim() == 0 {
         return format!("{}", arr.iter().next().copied().unwrap_or(0.0_f64));
     }
@@ -109,7 +116,12 @@ fn format_array_repr(arr: &Array<f64, IxDyn>, _prefix: &str) -> String {
             if i > 0 {
                 s.push_str(" ");
             }
-            s.push_str(&format_scalar(*val));
+            let val_str = format_scalar(*val);
+            if pad_width > 0 {
+                s.push_str(&format!("{:>width$}", val_str, width = pad_width));
+            } else {
+                s.push_str(&val_str);
+            }
         }
         s.push(']');
         return s;
@@ -121,11 +133,21 @@ fn format_array_repr(arr: &Array<f64, IxDyn>, _prefix: &str) -> String {
             s.push_str("\n ");
         }
         let sub = arr.index_axis(Axis(0), i).to_owned().into_dyn();
-        let row_str = format_array_repr(&sub, "");
+        let row_str = format_array_repr_inner(&sub, "", pad_width);
         s.push_str(&row_str);
     }
     s.push_str("]");
     s
+}
+
+fn format_array_repr(arr: &Array<f64, IxDyn>, _prefix: &str) -> String {
+    // 对 2D+ 数组计算最大宽度并右对齐填充，与 numpy 风格一致
+    let pad_width = if arr.ndim() >= 2 {
+        compute_max_width(arr)
+    } else {
+        0
+    };
+    format_array_repr_inner(arr, _prefix, pad_width)
 }
 
 fn format_scalar(val: f64) -> String {
@@ -2035,7 +2057,6 @@ fn minimum(x1: &NdArray, x2: &NdArray) -> PyResult<NdArray> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (a, b, rtol=1e-05, atol=1e-08))]
 fn allclose(a: &NdArray, b: &NdArray, rtol: f64, atol: f64) -> bool {
     if a.data.len() != b.data.len() {
         return false;
@@ -2046,6 +2067,14 @@ fn allclose(a: &NdArray, b: &NdArray, rtol: f64, atol: f64) -> bool {
         }
     }
     true
+}
+
+#[pyfunction]
+fn array_equal(a: &NdArray, b: &NdArray) -> bool {
+    if a.data.shape() != b.data.shape() {
+        return false;
+    }
+    a.data.iter().zip(b.data.iter()).all(|(x, y)| x == y)
 }
 
 #[pyfunction]
@@ -3583,7 +3612,7 @@ fn format_complex_scalar(val: f64) -> String {
     format!("{}+0.j", real_str)
 }
 
-fn format_complex_array(arr: &Array<f64, IxDyn>) -> String {
+fn format_complex_array_inner(arr: &Array<f64, IxDyn>, pad_width: usize) -> String {
     if arr.ndim() == 0 {
         return format_complex_scalar(arr.iter().next().copied().unwrap_or(0.0_f64));
     }
@@ -3593,7 +3622,12 @@ fn format_complex_array(arr: &Array<f64, IxDyn>) -> String {
             if i > 0 {
                 s.push_str(" ");
             }
-            s.push_str(&format_complex_scalar(*val));
+            let val_str = format_complex_scalar(*val);
+            if pad_width > 0 {
+                s.push_str(&format!("{:>width$}", val_str, width = pad_width));
+            } else {
+                s.push_str(&val_str);
+            }
         }
         s.push(']');
         return s;
@@ -3605,11 +3639,23 @@ fn format_complex_array(arr: &Array<f64, IxDyn>) -> String {
             s.push_str("\n ");
         }
         let sub = arr.index_axis(Axis(0), i).to_owned().into_dyn();
-        let row_str = format_complex_array(&sub);
+        let row_str = format_complex_array_inner(&sub, pad_width);
         s.push_str(&row_str);
     }
     s.push_str("]");
     s
+}
+
+fn format_complex_array(arr: &Array<f64, IxDyn>) -> String {
+    let pad_width = if arr.ndim() >= 2 {
+        arr.iter()
+            .map(|v| format_complex_scalar(*v).len())
+            .max()
+            .unwrap_or(1)
+    } else {
+        0
+    };
+    format_complex_array_inner(arr, pad_width)
 }
 
 #[pyfunction]
@@ -3711,6 +3757,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(maximum, m)?)?;
     m.add_function(wrap_pyfunction!(minimum, m)?)?;
     m.add_function(wrap_pyfunction!(allclose, m)?)?;
+    m.add_function(wrap_pyfunction!(array_equal, m)?)?;
     m.add_function(wrap_pyfunction!(argwhere, m)?)?;
     m.add_function(wrap_pyfunction!(count_nonzero, m)?)?;
 

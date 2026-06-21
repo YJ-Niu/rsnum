@@ -49,7 +49,7 @@ class NdArrayMethods:
         
         # Rust 端处理 -1 和形状验证
         result = arr._array.reshape(shape)
-        return _wrap_result(result)
+        return ndarray._wrap(result, _dtype=getattr(arr, '_dtype', "float64"), _fields=getattr(arr, '_fields', None), _raw_data=getattr(arr, '_raw_data', None))
     
     @staticmethod
     def resize(arr, new_shape):
