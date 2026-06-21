@@ -27,6 +27,56 @@ from .linalg import linalg_module as _linalg_module
 from .random import random_module as _random_module
 
 
+class ArrayFlags:
+    """数组内存布局信息，与 NumPy 的 np.ndarray.flags 兼容。"""
+
+    def __init__(self, arr):
+        self._arr = arr
+
+    @property
+    def C_CONTIGUOUS(self):
+        return True
+
+    @property
+    def F_CONTIGUOUS(self):
+        return True
+
+    @property
+    def OWNDATA(self):
+        return True
+
+    @property
+    def WRITEABLE(self):
+        return True
+
+    @property
+    def ALIGNED(self):
+        return True
+
+    @property
+    def WRITEBACKIFCOPY(self):
+        return False
+
+    @property
+    def UPDATEIFCOPY(self):
+        return False
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        lines = [
+            f"  C_CONTIGUOUS : {self.C_CONTIGUOUS}",
+            f"  F_CONTIGUOUS : {self.F_CONTIGUOUS}",
+            f"  OWNDATA : {self.OWNDATA}",
+            f"  WRITEABLE : {self.WRITEABLE}",
+            f"  ALIGNED : {self.ALIGNED}",
+            f"  WRITEBACKIFCOPY : {self.WRITEBACKIFCOPY}",
+            f"  UPDATEIFCOPY : {self.UPDATEIFCOPY}",
+        ]
+        return "\n".join(lines)
+
+
 class ndarray:
     """
     rsnumpy.ndarray - 多维数组对象。
@@ -85,6 +135,8 @@ class ndarray:
             return _format_structured_repr(self)
         if getattr(self, '_dtype', "float64") == "complex128":
             return _core._format_complex_repr(self._array)
+        if getattr(self, '_dtype', "float64") == "int64" and getattr(self, '_is_empty', False):
+            return _core._format_int_repr(self._array)
         return repr(self._array)
 
     def __str__(self):
@@ -93,6 +145,8 @@ class ndarray:
             return _format_structured_str(self)
         if getattr(self, '_dtype', "float64") == "complex128":
             return _core._format_complex_str(self._array)
+        if getattr(self, '_dtype', "float64") == "int64" and getattr(self, '_is_empty', False):
+            return _core._format_int_str(self._array)
         return str(self._array)
 
     def __len__(self):
@@ -287,6 +341,41 @@ class ndarray:
         if raw is not None:
             return (len(raw),)
         return self._array.shape
+
+    @shape.setter
+    def shape(self, new_shape):
+        """设置数组形状，相当于原地 reshape。"""
+        raw = getattr(self, '_raw_data', None)
+        if raw is not None:
+            total = len(raw)
+            new_flat = list(raw)
+            if isinstance(new_shape, int):
+                new_shape = (new_shape,)
+            new_size = 1
+            for s in new_shape:
+                new_size *= s
+            if new_size != total:
+                raise ValueError(f"cannot reshape array of size {total} into shape {new_shape}")
+            # 扁平化 raw_data 并按新形状展平
+            if len(new_shape) == 1:
+                self._raw_data = new_flat
+            else:
+                self._raw_data = new_flat
+        else:
+            total = self._array.size
+            if isinstance(new_shape, int):
+                new_shape = (new_shape,)
+            new_size = 1
+            for s in new_shape:
+                new_size *= s
+            if new_size != total:
+                raise ValueError(f"cannot reshape array of size {total} into shape {new_shape}")
+            self._array = self._array.reshape(new_shape)
+
+    @property
+    def flags(self):
+        """返回数组的内存布局信息，与 NumPy 的 ndarray.flags 兼容。"""
+        return ArrayFlags(self)
 
     @property
     def ndim(self):
@@ -906,6 +995,8 @@ def _resolve_dtype(dtype):
     dt_str = dtype if isinstance(dtype, str) else dtype.__name__
     if dt_str in ("complex", "complex128", "complex64", "cfloat", "cdouble"):
         return "complex128"
+    if dt_str in ("int", "int8", "int16", "int32", "int64", "intp", "int_", "intc", "uint", "uint8", "uint16", "uint32", "uint64"):
+        return "int64"
     return "float64"
 
 
