@@ -233,21 +233,31 @@ class ndarray:
                     else:
                         new_key.append(k)
                 key = tuple(new_key)
-        # 将 Python ndarray 索引替换为底层 _array（Rust 对象）
+        # 将 Python ndarray 索引展平为 Python list，确保 Rust 端可正确解析
         if isinstance(key, tuple):
-            key = tuple(k._array if isinstance(k, ndarray) else k for k in key)
+            key = tuple(
+                _ndarray_to_index_list(k)
+                if hasattr(k, '_array') else k
+                for k in key
+            )
         else:
-            key = (key._array if isinstance(key, ndarray) else key,)
+            key = (_ndarray_to_index_list(key)
+                   if hasattr(key, '_array') else key,)
         # 委托给 Rust getitem_multi 处理所有索引逻辑
         result = _core.getitem_multi(self._array, key, list(self.shape))
         return _wrap_result(result, self._dtype)
 
     def __setitem__(self, key, value):
         if isinstance(key, tuple):
-            # 将 Python ndarray 索引替换为底层 _array
-            key = tuple(k._array if isinstance(k, ndarray) else k for k in key)
+            # 将 Python ndarray 索引展平为 list
+            key = tuple(
+                _ndarray_to_index_list(k)
+                if hasattr(k, '_array') else k
+                for k in key
+            )
         elif not isinstance(key, str):
-            key = (key._array if isinstance(key, ndarray) else key,)
+            key = (_ndarray_to_index_list(key)
+                   if hasattr(key, '_array') else key,)
         if isinstance(key, tuple):
             _core.setitem_multi(self._array, key, list(self.shape), value)
         else:
@@ -633,6 +643,21 @@ def _ensure(x):
     elif hasattr(x, '__class__') and x.__class__.__name__ == 'ndarray':
         return x
     return x
+
+
+def _ndarray_to_index_list(k):
+    """将 ndarray 索引转为 Rust 可解析的 Python list，保留多维嵌套结构。"""
+    raw = k._array.tolist()  # preserve shape: [[1],[5],[7],[2]] or [1,0,1,0,1]
+    dtype_name = getattr(k, '_dtype', 'float64')
+
+    def _convert(v):
+        if isinstance(v, (list, tuple)):
+            return [_convert(x) for x in v]
+        if dtype_name == 'bool':
+            return bool(v)
+        return int(v)
+
+    return _convert(raw)
 
 
 def _wrap_result(result, dtype="float64"):
@@ -1139,14 +1164,24 @@ def _resolve_dtype(dtype):
         return "complex128"
     if dt_str in ("int", "int8", "int16", "int32", "int64", "intp", "int_", "intc", "uint", "uint8", "uint16", "uint32", "uint64"):
         return "int64"
+    if dt_str in ("bool", "bool_"):
+        return "bool"
     return "float64"
 
 
 def _infer_int_dtype(*args):
-    """推断参数中是否全部为整数，决定使用 int64 还是 float64。"""
+    """推断参数中的类型：全 bool→bool，全 int→int64，否则 float64。"""
+    has_bool = False
+    has_int = False
     for a in args:
-        if not isinstance(a, (int, bool)):
+        if isinstance(a, bool):
+            has_bool = True
+        elif isinstance(a, int):
+            has_int = True
+        else:
             return "float64"
+    if has_bool and not has_int:
+        return "bool"
     return "int64"
 
 

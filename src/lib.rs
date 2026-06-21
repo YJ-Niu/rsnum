@@ -9,7 +9,7 @@ mod random;
 mod fft;
 mod indexing;
 
-fn parse_py_list_to_flat(data: &Bound<'_, PyAny>) -> PyResult<(Vec<f64>, Vec<usize>)> {
+pub(crate) fn parse_py_list_to_flat(data: &Bound<'_, PyAny>) -> PyResult<(Vec<f64>, Vec<usize>)> {
     if let Ok(val) = data.extract::<f64>() {
         return Ok((vec![val], vec![]));
     }
@@ -714,23 +714,27 @@ impl NdArray {
                 let post_size: usize = shape.iter().skip(ax + 1).product();
                 let block_size = axis_size * post_size;
                 let data_vec: Vec<f64> = self.data.iter().copied().collect();
-                let mut result = Vec::with_capacity(pre_size * post_size);
-                for outer in 0..pre_size {
-                    for inner in 0..post_size {
+                // 并行计算每个切片的乘积
+                let n_slices = pre_size * post_size;
+                let results: Vec<f64> = (0..n_slices)
+                    .into_par_iter()
+                    .map(|idx| {
+                        let outer = idx / post_size;
+                        let inner = idx % post_size;
                         let base = outer * block_size + inner;
                         let mut prod = 1.0_f64;
                         for k in 0..axis_size {
                             prod *= data_vec[base + k * post_size];
                         }
-                        result.push(prod);
-                    }
-                }
+                        prod
+                    })
+                    .collect();
                 let new_shape: Vec<usize> = shape.iter()
                     .enumerate()
                     .filter(|(i, _)| *i != ax)
                     .map(|(_, &s)| s)
                     .collect();
-                let arr = Array::from_shape_vec(IxDyn(&new_shape), result)
+                let arr = Array::from_shape_vec(IxDyn(&new_shape), results)
                     .map_err(|e| PyValueError::new_err(e.to_string()))?;
                 Ok(NdArray { data: arr })
             }
@@ -750,15 +754,31 @@ impl NdArray {
         let post_size: usize = shape.iter().skip(ax + 1).product();
         let block_size = axis_size * post_size;
         let data_vec: Vec<f64> = self.data.iter().copied().collect();
-        let mut result = Vec::with_capacity(data_vec.len());
-        for outer in 0..pre_size {
-            for inner in 0..post_size {
+        // 并行计算每个切片的累积和
+        let n_slices = pre_size * post_size;
+        let slice_results: Vec<Vec<f64>> = (0..n_slices)
+            .into_par_iter()
+            .map(|idx| {
+                let outer = idx / post_size;
+                let inner = idx % post_size;
                 let base = outer * block_size + inner;
                 let mut cum = 0.0_f64;
+                let mut slice = Vec::with_capacity(axis_size);
                 for k in 0..axis_size {
                     cum += data_vec[base + k * post_size];
-                    result.push(cum);
+                    slice.push(cum);
                 }
+                slice
+            })
+            .collect();
+        // 按正确内存布局写回
+        let mut result = vec![0.0; data_vec.len()];
+        for (idx, slice) in slice_results.into_iter().enumerate() {
+            let outer = idx / post_size;
+            let inner = idx % post_size;
+            let base = outer * block_size + inner;
+            for (k, val) in slice.into_iter().enumerate() {
+                result[base + k * post_size] = val;
             }
         }
         let arr = Array::from_shape_vec(IxDyn(&shape), result)
@@ -779,15 +799,31 @@ impl NdArray {
         let post_size: usize = shape.iter().skip(ax + 1).product();
         let block_size = axis_size * post_size;
         let data_vec: Vec<f64> = self.data.iter().copied().collect();
-        let mut result = Vec::with_capacity(data_vec.len());
-        for outer in 0..pre_size {
-            for inner in 0..post_size {
+        // 并行计算每个切片的累积乘积
+        let n_slices = pre_size * post_size;
+        let slice_results: Vec<Vec<f64>> = (0..n_slices)
+            .into_par_iter()
+            .map(|idx| {
+                let outer = idx / post_size;
+                let inner = idx % post_size;
                 let base = outer * block_size + inner;
                 let mut cum = 1.0_f64;
+                let mut slice = Vec::with_capacity(axis_size);
                 for k in 0..axis_size {
                     cum *= data_vec[base + k * post_size];
-                    result.push(cum);
+                    slice.push(cum);
                 }
+                slice
+            })
+            .collect();
+        // 按正确内存布局写回
+        let mut result = vec![0.0; data_vec.len()];
+        for (idx, slice) in slice_results.into_iter().enumerate() {
+            let outer = idx / post_size;
+            let inner = idx % post_size;
+            let base = outer * block_size + inner;
+            for (k, val) in slice.into_iter().enumerate() {
+                result[base + k * post_size] = val;
             }
         }
         let arr = Array::from_shape_vec(IxDyn(&shape), result)
@@ -1024,9 +1060,13 @@ impl NdArray {
                         let post_size: usize = shape.iter().skip(ax + 1).product();
                         let data_vec: Vec<f64> = self.data.iter().copied().collect();
 
-                        let mut result = Vec::with_capacity(pre_size * post_size);
-                        for outer in 0..pre_size {
-                            for inner in 0..post_size {
+                        // 并行计算每个切片的方差
+                        let n_slices = pre_size * post_size;
+                        let results: Vec<f64> = (0..n_slices)
+                            .into_par_iter()
+                            .map(|idx| {
+                                let outer = idx / post_size;
+                                let inner = idx % post_size;
                                 let base = outer * axis_size * post_size + inner;
                                 let mean = mean_arr[outer * post_size + inner];
                                 let mut sum_sq = 0.0;
@@ -1034,10 +1074,9 @@ impl NdArray {
                                     let diff = data_vec[base + k * post_size] - mean;
                                     sum_sq += diff * diff;
                                 }
-                                let variance = sum_sq / axis_size as f64;
-                                result.push(variance.sqrt());
-                            }
-                        }
+                                (sum_sq / axis_size as f64).sqrt()
+                            })
+                            .collect();
 
                         let new_shape: Vec<usize> = shape.iter()
                             .enumerate()
@@ -1047,10 +1086,10 @@ impl NdArray {
 
                         if new_shape.is_empty() {
                             Ok(NdArray {
-                                data: Array::from_elem(IxDyn(&[]), result[0]),
+                                data: Array::from_elem(IxDyn(&[]), results[0]),
                             })
                         } else {
-                            let arr = Array::from_shape_vec(IxDyn(&new_shape), result)
+                            let arr = Array::from_shape_vec(IxDyn(&new_shape), results)
                                 .map_err(|e| PyValueError::new_err(e.to_string()))?;
                             Ok(NdArray { data: arr })
                         }
@@ -1087,9 +1126,13 @@ impl NdArray {
                         let post_size: usize = shape.iter().skip(ax + 1).product();
                         let data_vec: Vec<f64> = self.data.iter().copied().collect();
 
-                        let mut result = Vec::with_capacity(pre_size * post_size);
-                        for outer in 0..pre_size {
-                            for inner in 0..post_size {
+                        // 并行计算每个切片的方差
+                        let n_slices = pre_size * post_size;
+                        let results: Vec<f64> = (0..n_slices)
+                            .into_par_iter()
+                            .map(|idx| {
+                                let outer = idx / post_size;
+                                let inner = idx % post_size;
                                 let base = outer * axis_size * post_size + inner;
                                 let mean = mean_arr[outer * post_size + inner];
                                 let mut sum_sq = 0.0;
@@ -1097,9 +1140,9 @@ impl NdArray {
                                     let diff = data_vec[base + k * post_size] - mean;
                                     sum_sq += diff * diff;
                                 }
-                                result.push(sum_sq / axis_size as f64);
-                            }
-                        }
+                                sum_sq / axis_size as f64
+                            })
+                            .collect();
 
                         let new_shape: Vec<usize> = shape.iter()
                             .enumerate()
@@ -1109,10 +1152,10 @@ impl NdArray {
 
                         if new_shape.is_empty() {
                             Ok(NdArray {
-                                data: Array::from_elem(IxDyn(&[]), result[0]),
+                                data: Array::from_elem(IxDyn(&[]), results[0]),
                             })
                         } else {
-                            let arr = Array::from_shape_vec(IxDyn(&new_shape), result)
+                            let arr = Array::from_shape_vec(IxDyn(&new_shape), results)
                                 .map_err(|e| PyValueError::new_err(e.to_string()))?;
                             Ok(NdArray { data: arr })
                         }
@@ -1248,16 +1291,28 @@ impl NdArray {
         let pre_size: usize = shape.iter().take(ax).product();
         let post_size: usize = shape.iter().skip(ax + 1).product();
         let block_size = axis_size * post_size;
-        for outer in 0..pre_size {
-            for inner in 0..post_size {
+        // 并行排序每个轴切片
+        let n_slices = pre_size * post_size;
+        let sorted_slices: Vec<Vec<f64>> = (0..n_slices)
+            .into_par_iter()
+            .map(|idx| {
+                let outer = idx / post_size;
+                let inner = idx % post_size;
                 let base = outer * block_size + inner;
                 let mut slice: Vec<f64> = (0..axis_size)
                     .map(|k| data_vec[base + k * post_size])
                     .collect();
                 slice.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                for (k, val) in slice.into_iter().enumerate() {
-                    data_vec[base + k * post_size] = val;
-                }
+                slice
+            })
+            .collect();
+        // 写回结果（串行，排序已并行完成）
+        for (idx, sorted_slice) in sorted_slices.into_iter().enumerate() {
+            let outer = idx / post_size;
+            let inner = idx % post_size;
+            let base = outer * block_size + inner;
+            for (k, val) in sorted_slice.into_iter().enumerate() {
+                data_vec[base + k * post_size] = val;
             }
         }
         let arr = Array::from_shape_vec(IxDyn(&shape), data_vec)
@@ -1287,17 +1342,28 @@ impl NdArray {
         let pre_size: usize = shape.iter().take(ax).product();
         let post_size: usize = shape.iter().skip(ax + 1).product();
         let block_size = axis_size * post_size;
-        let mut result = data_vec.clone();
-        for outer in 0..pre_size {
-            for inner in 0..post_size {
+        // 并行计算每个轴切片的排序索引
+        let n_slices = pre_size * post_size;
+        let index_results: Vec<Vec<(usize, f64)>> = (0..n_slices)
+            .into_par_iter()
+            .map(|idx| {
+                let outer = idx / post_size;
+                let inner = idx % post_size;
                 let base = outer * block_size + inner;
                 let mut indexed: Vec<(usize, f64)> = (0..axis_size)
                     .map(|k| (k, data_vec[base + k * post_size]))
                     .collect();
                 indexed.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                for (pos, (idx, _)) in indexed.into_iter().enumerate() {
-                    result[base + pos * post_size] = idx as f64;
-                }
+                indexed
+            })
+            .collect();
+        let mut result = data_vec;
+        for (idx, indexed) in index_results.into_iter().enumerate() {
+            let outer = idx / post_size;
+            let inner = idx % post_size;
+            let base = outer * block_size + inner;
+            for (pos, (idx_val, _)) in indexed.into_iter().enumerate() {
+                result[base + pos * post_size] = idx_val as f64;
             }
         }
         let arr = Array::from_shape_vec(IxDyn(&shape), result)
@@ -1312,7 +1378,7 @@ fn binary_op<F>(
     op: F,
 ) -> PyResult<NdArray>
 where
-    F: Fn(f64, f64) -> f64,
+    F: Fn(f64, f64) -> f64 + Sync,
 {
     if let Ok(scalar) = b.extract::<f64>() {
         return Ok(NdArray {
@@ -1332,7 +1398,7 @@ fn binary_op_lr<F>(
     op: F,
 ) -> PyResult<NdArray>
 where
-    F: Fn(f64, f64) -> f64,
+    F: Fn(f64, f64) -> f64 + Sync,
 {
     if let Ok(scalar) = b.extract::<f64>() {
         return Ok(NdArray {
@@ -1352,13 +1418,20 @@ fn broadcast_binary_op<F>(
     op: F,
 ) -> PyResult<Array<f64, IxDyn>>
 where
-    F: Fn(f64, f64) -> f64,
+    F: Fn(f64, f64) -> f64 + Sync,
 {
     let a_shape = a.shape().to_vec();
     let b_shape = b.shape().to_vec();
 
     if a_shape == b_shape {
-        let result: Vec<f64> = a.iter().cloned().zip(b.iter().cloned()).map(|(x, y)| op(x, y)).collect();
+        // 并行计算：收集到 Vec 后使用 rayon 并行处理
+        let a_vec: Vec<f64> = a.iter().copied().collect();
+        let b_vec: Vec<f64> = b.iter().copied().collect();
+        let result: Vec<f64> = a_vec
+            .into_par_iter()
+            .zip(b_vec.into_par_iter())
+            .map(|(x, y)| op(x, y))
+            .collect();
         return Array::from_shape_vec(IxDyn(&a_shape), result)
             .map_err(|e| PyValueError::new_err(e.to_string()));
     }
@@ -1383,24 +1456,24 @@ where
     let a_broadcast = a
         .clone()
         .into_shape_with_order(IxDyn(&a_padded))
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
-    let a_broadcast = a_broadcast
+        .map_err(|e| PyValueError::new_err(e.to_string()))?
         .broadcast(IxDyn(&out_shape))
         .ok_or_else(|| PyValueError::new_err("Broadcasting failed"))?
         .to_owned();
     let b_broadcast = b
         .clone()
         .into_shape_with_order(IxDyn(&b_padded))
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
-    let b_broadcast = b_broadcast
+        .map_err(|e| PyValueError::new_err(e.to_string()))?
         .broadcast(IxDyn(&out_shape))
         .ok_or_else(|| PyValueError::new_err("Broadcasting failed"))?
         .to_owned();
 
-    let result: Vec<f64> = a_broadcast
-        .iter()
-        .zip(b_broadcast.iter())
-        .map(|(x, y)| op(*x, *y))
+    let a_vec: Vec<f64> = a_broadcast.iter().copied().collect();
+    let b_vec: Vec<f64> = b_broadcast.iter().copied().collect();
+    let result: Vec<f64> = a_vec
+        .into_par_iter()
+        .zip(b_vec.into_par_iter())
+        .map(|(x, y)| op(x, y))
         .collect();
 
     Array::from_shape_vec(IxDyn(&out_shape), result)
@@ -1737,8 +1810,12 @@ fn where_<'py>(py: Python<'py>, condition: &NdArray, x: Option<&NdArray>, y: Opt
             Ok(PyTuple::new(py, tuples)?.into_any())
         }
         (Some(xv), Some(yv)) => {
-            let result: Vec<f64> = condition.data.iter().zip(xv.data.iter().zip(yv.data.iter()))
-                .map(|(&c, (&xv, &yv))| if c != 0.0 { xv } else { yv })
+            let cond_vec: Vec<f64> = condition.data.iter().copied().collect();
+            let x_vec: Vec<f64> = xv.data.iter().copied().collect();
+            let y_vec: Vec<f64> = yv.data.iter().copied().collect();
+            let result: Vec<f64> = cond_vec.into_par_iter()
+                .zip(x_vec.into_par_iter().zip(y_vec.into_par_iter()))
+                .map(|(c, (xv, yv))| if c != 0.0 { xv } else { yv })
                 .collect();
             let arr = Array::from_shape_vec(condition.data.dim(), result)
                 .map_err(|e| PyValueError::new_err(e.to_string()))?;
@@ -2668,8 +2745,10 @@ fn flatnonzero(a: &NdArray) -> PyResult<NdArray> {
 
 #[pyfunction]
 fn ptp(a: &NdArray) -> PyResult<NdArray> {
-    let min_val = a.data.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max_val = a.data.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let (min_val, max_val) = a.data.iter().cloned().fold(
+        (f64::INFINITY, f64::NEG_INFINITY),
+        |(min, max), v| (min.min(v), max.max(v)),
+    );
     Ok(NdArray {
         data: Array::from_elem(IxDyn(&[]), max_val - min_val),
     })
@@ -2680,13 +2759,11 @@ fn digitize(x: &NdArray, bins: &NdArray) -> PyResult<NdArray> {
     let x_vals: Vec<f64> = x.data.iter().copied().collect();
     let mut bin_edges: Vec<f64> = bins.data.iter().copied().collect();
     bin_edges.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let result: Vec<f64> = x_vals.iter().map(|&v| {
-        let mut idx = 0;
-        for (i, &edge) in bin_edges.iter().enumerate() {
-            if v >= edge { idx = i + 1; } else { break; }
-        }
-        idx as f64
-    }).collect();
+    // 二分查找 + 并行计算：O(n*log m)，原先线性 O(n*m)
+    let result: Vec<f64> = x_vals
+        .par_iter()
+        .map(|&v| bin_edges.partition_point(|&edge| v >= edge) as f64)
+        .collect();
     let arr = Array::from_shape_vec(IxDyn(&[result.len()]), result)
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(NdArray { data: arr })

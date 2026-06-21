@@ -3,7 +3,7 @@ use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PySlice, PyTuple};
 
-use crate::NdArray;
+use crate::{NdArray, parse_py_list_to_flat};
 
 /// 索引描述符：每个维度上的索引方式
 #[derive(Clone)]
@@ -20,18 +20,54 @@ enum IndexDesc {
 
 /// 解析 Python 索引对象，返回 IndexDesc
 fn parse_single_index(item: &Bound<'_, PyAny>, dim_size: isize) -> PyResult<IndexDesc> {
-    // 先尝试解析为 ndarray（必须在 int 之前，否则 __float__ 会干扰）
-    if let Ok(arr) = item.extract::<NdArray>() {
-        let vals: Vec<f64> = arr.data.iter().copied().collect();
-        let fancy: Vec<usize> = vals.iter().map(|&v| {
-            let iv = v as isize;
-            if iv < 0 { (dim_size + iv) as usize } else { iv as usize }
-        }).collect();
-        let ndim = arr.data.ndim();
-        if ndim > 1 {
-            return Ok(IndexDesc::FancyMulti(fancy));
+    // 先尝试解析为 Python 列表（布尔列表优先于 NdArray 构造）
+    if let Ok(list) = item.cast::<PyList>() {
+        if list.is_empty() {
+            return Ok(IndexDesc::Fancy(vec![]));
         }
-        return Ok(IndexDesc::Fancy(fancy));
+        // 检查是否为布尔列表（严格类型检查，而非 truthiness）
+        let mut is_bool = true;
+        for e in list.iter() {
+            if e.get_type().name().map(|n| n != "bool").unwrap_or(true) {
+                is_bool = false;
+                break;
+            }
+        }
+        if is_bool {
+            let mut fancy: Vec<usize> = Vec::new();
+            for (j, e) in list.iter().enumerate() {
+                if e.extract::<bool>().unwrap_or(false) {
+                    fancy.push(j);
+                }
+            }
+            return Ok(IndexDesc::Fancy(fancy));
+        }
+        // 尝试整数列表
+        let mut fancy: Vec<usize> = Vec::new();
+        let mut all_int = true;
+        for e in list.iter() {
+            if let Ok(v) = e.extract::<isize>() {
+                let actual = if v < 0 { (dim_size + v) as usize } else { v as usize };
+                fancy.push(actual);
+            } else {
+                all_int = false;
+                break;
+            }
+        }
+        if all_int {
+            return Ok(IndexDesc::Fancy(fancy));
+        }
+        // 非标量列表（嵌套结构）→ 尝试构造 NdArray（保留多维形状）
+        let (values, shape) = parse_py_list_to_flat(item)?;
+        let nd_shape = if shape.is_empty() { IxDyn(&[]) } else { IxDyn(&shape) };
+        let arr = Array::from_shape_vec(nd_shape, values)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        return Ok(ndarray_to_index_desc(&NdArray { data: arr }, dim_size));
+    }
+
+    // 尝试解析为 ndarray
+    if let Ok(arr) = item.extract::<NdArray>() {
+        return Ok(ndarray_to_index_desc(&arr, dim_size));
     }
 
     // 尝试解析为 slice
@@ -61,40 +97,25 @@ fn parse_single_index(item: &Bound<'_, PyAny>, dim_size: isize) -> PyResult<Inde
         return Ok(IndexDesc::Int(actual_idx));
     }
 
-    // 尝试解析为列表（整数列表）
-    if let Ok(list) = item.cast::<PyList>() {
-        // 先判断是否为布尔列表
-        let mut is_bool = true;
-        for e in list.iter() {
-            if e.extract::<bool>().is_err() {
-                is_bool = false;
-                break;
-            }
-        }
-        if is_bool && list.len() > 0 {
-            let mut fancy: Vec<usize> = Vec::new();
-            for (j, e) in list.iter().enumerate() {
-                if e.extract::<bool>().unwrap_or(false) {
-                    fancy.push(j);
-                }
-            }
-            return Ok(IndexDesc::Fancy(fancy));
-        }
-        // 整数列表
-        let mut fancy: Vec<usize> = Vec::new();
-        for e in list.iter() {
-            let v = e.extract::<isize>()?;
-            let actual = if v < 0 { (dim_size + v) as usize } else { v as usize };
-            fancy.push(actual);
-        }
-        return Ok(IndexDesc::Fancy(fancy));
-    }
-
     // 以上都不匹配
     Err(PyTypeError::new_err(format!(
         "Unsupported index type: {}",
         item.get_type().name()?
     )))
+}
+
+/// 从 NdArray 提取索引描述符
+fn ndarray_to_index_desc(arr: &NdArray, dim_size: isize) -> IndexDesc {
+    let vals: Vec<f64> = arr.data.iter().copied().collect();
+    let fancy: Vec<usize> = vals.iter().map(|&v| {
+        let iv = v as isize;
+        if iv < 0 { (dim_size + iv) as usize } else { iv as usize }
+    }).collect();
+    if arr.data.ndim() > 1 {
+        IndexDesc::FancyMulti(fancy)
+    } else {
+        IndexDesc::Fancy(fancy)
+    }
 }
 
 /// 展开 Ellipsis 并解析索引元组，返回 IndexDesc 列表
