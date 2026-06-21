@@ -48,27 +48,35 @@ class ndarray:
         imag: 数组的虚部。
     """
 
-    def __init__(self, data, _dtype="float64", _fields=None):
+    def __init__(self, data, _dtype="float64", _fields=None, _raw_data=None):
         if isinstance(data, ndarray):
             self._array = data._array
             self._dtype = data._dtype
             self._fields = getattr(data, '_fields', None)
+            self._raw_data = getattr(data, '_raw_data', None)
         elif hasattr(data, '__class__') and data.__class__.__name__ == 'ndarray':
             self._array = data
             self._dtype = _dtype
             self._fields = _fields
+            self._raw_data = _raw_data
         else:
-            self._array = _core.ndarray(data)
+            self._raw_data = _raw_data
+            if _raw_data is not None:
+                # 原始数据存储：用一个虚拟 Rust 数组占位
+                self._array = _core.zeros((len(data),) if isinstance(data, (list, tuple)) else (1,))
+            else:
+                self._array = _core.ndarray(data)
             self._dtype = _dtype
             self._fields = _fields
 
     @staticmethod
-    def _wrap(raw_array, _dtype="float64", _fields=None):
+    def _wrap(raw_array, _dtype="float64", _fields=None, _raw_data=None):
         """包装原始 Rust ndarray 到 Python 类。"""
         obj = ndarray.__new__(ndarray)
         obj._array = raw_array
         obj._dtype = _dtype
         obj._fields = _fields
+        obj._raw_data = _raw_data
         return obj
 
     def __repr__(self):
@@ -88,9 +96,19 @@ class ndarray:
         return str(self._array)
 
     def __len__(self):
+        raw = getattr(self, '_raw_data', None)
+        if raw is not None:
+            return len(raw)
         if self.ndim == 0:
             raise TypeError("len() of unsized object")
         return len(self._array)
+
+    def tolist(self):
+        """转换为 Python 列表。"""
+        raw = getattr(self, '_raw_data', None)
+        if raw is not None:
+            return raw
+        return self._array.tolist()
 
     def __bool__(self):
         if self.ndim == 0:
@@ -98,6 +116,12 @@ class ndarray:
         raise ValueError("The truth value of an array with more than one element is ambiguous.")
 
     def __getitem__(self, key):
+        # 结构化数组的字段访问：a['age']
+        fields = getattr(self, '_fields', None)
+        if fields and isinstance(key, str):
+            field_names = [f[0] for f in fields]
+            if key in field_names:
+                return ndarray._wrap(self._array, self._dtype, _fields=None)
         if isinstance(key, tuple):
             # 拆分为整数索引和切片，避免把整数当作 (i, i+1, 1) 的范围
             int_indices = []
@@ -259,16 +283,29 @@ class ndarray:
     @property
     def shape(self):
         """返回数组维度的元组。"""
+        raw = getattr(self, '_raw_data', None)
+        if raw is not None:
+            return (len(raw),)
         return self._array.shape
 
     @property
     def ndim(self):
         """返回数组维度数量。"""
+        raw = getattr(self, '_raw_data', None)
+        if raw is not None:
+            return len(self.shape)
         return self._array.ndim
 
     @property
     def size(self):
         """返回元素总数。"""
+        raw = getattr(self, '_raw_data', None)
+        if raw is not None:
+            s = self.shape
+            n = 1
+            for v in s:
+                n *= v
+            return n
         return self._array.size
 
     @property
@@ -407,10 +444,6 @@ class ndarray:
         """获取单个元素。"""
         return _ndarray_methods().item(self, *args)
 
-    def tolist(self):
-        """转换为 Python 列表。"""
-        return _ndarray_methods().tolist(self)
-
     def take(self, indices, axis=None):
         """根据索引取元素。"""
         return _ndarray_methods().take(self, indices, axis)
@@ -515,6 +548,83 @@ def _scalar(x):
     if hasattr(x, 'tolist'):
         return x.tolist()
     return x
+
+
+def _format_structured_flat(arr):
+    """将结构化 ndarray 展平为 Python 列表。"""
+    raw = getattr(arr, '_raw_data', None)
+    if raw is not None:
+        return raw
+    return arr.tolist()
+
+
+def _format_structured_val(val, fields=None):
+    """格式化结构化数组中的单个元素值。"""
+    def fmt(v, field_type=None):
+        if isinstance(v, str):
+            return "b'" + v + "'"
+        if isinstance(v, bytes):
+            return "b'" + v.decode("utf-8", errors="replace") + "'"
+        if isinstance(v, float):
+            if v == int(v) and abs(v) < 1e16:
+                return str(int(v)) + "."
+            return str(v)
+        # int 值且字段类型为浮点 → 显示小数点
+        if isinstance(v, int) and field_type and field_type.startswith('f'):
+            return str(v) + "."
+        return str(v)
+    if isinstance(val, (list, tuple)):
+        parts = []
+        for i, v in enumerate(val):
+            ft = fields[i][1] if fields and i < len(fields) else None
+            if not isinstance(ft, str):
+                ft = _resolve_type_name(ft) if ft else None
+            parts.append(fmt(v, ft))
+        if len(parts) == 1:
+            return "(" + ", ".join(parts) + ",)"
+        return "(" + ", ".join(parts) + ")"
+    return "(" + fmt(val) + ",)"
+
+
+def _format_structured_str(arr):
+    """__str__ 用于结构化数组。"""
+    fields = getattr(arr, '_fields', None)
+    flat = arr.tolist()
+    if arr.ndim == 1:
+        parts = [_format_structured_val(v, fields) for v in flat]
+        return "[" + " ".join(parts) + "]"
+    # 高维：递归格式化
+    return _format_structured_recursive(flat, arr.ndim, fields)
+
+
+def _format_structured_recursive(data, ndim, fields=None):
+    if ndim == 1:
+        parts = [_format_structured_val(v, fields) for v in data]
+        return "[" + " ".join(parts) + "]"
+    parts = []
+    for row in data:
+        parts.append(_format_structured_recursive(row, ndim - 1, fields))
+    return "[" + "\n ".join(parts) + "]"
+
+
+def _format_structured_repr(arr):
+    """__repr__ 用于结构化数组。"""
+    fields = getattr(arr, '_fields', None)
+    dtype_str = _format_fields_for_dtype(fields) if fields else ""
+    inner = _format_structured_str(arr)
+    return f"rsnumpy.ndarray({inner}) dtype={dtype_str}"
+
+
+def _format_fields_for_dtype(fields):
+    """将字段列表格式化为 dtype 字符串。"""
+    parts = []
+    for name, tp in fields:
+        # tp 可能是类对象（如 np.int8），需要先解析为字符串
+        if not isinstance(tp, str):
+            tp = _resolve_type_name(tp)
+        code = _RS_NAME_TO_CODE.get(tp, tp)
+        parts.append(f"('{name}', '{code}')")
+    return "[" + ", ".join(parts) + "]"
 
 
 def _ndarray_methods():
@@ -718,10 +828,22 @@ complex128 = type('complex128', (), {})
 def array(data, dtype=None, copy=True, order='K', subok=False, ndmin=0):
     """创建数组。"""
     _dtype = _resolve_dtype(dtype)
-    arr = ndarray(data, _dtype=_dtype)
+    _fields = None
+    _raw_data = None
+    if isinstance(dtype, DType) and dtype._fields:
+        _fields = dtype._fields
+        # 多字段结构化数据 → 存储原始 Python 数据
+        if len(_fields) > 1 or any(isinstance(row, (list, tuple)) and len(row) > 1 for row in data):
+            _raw_data = list(data)
+            data = [tuple(v for v in row) if isinstance(row, (list, tuple)) else row for row in data]
+        else:
+            # 单字段：展平数值
+            flat_data = [row[0] if isinstance(row, (list, tuple)) and len(row) == 1 else row for row in data]
+            data = flat_data
+    arr = ndarray(data, _dtype=_dtype, _fields=_fields, _raw_data=_raw_data)
     if ndmin > arr.ndim:
         new_shape = (1,) * (ndmin - arr.ndim) + arr.shape
-        arr = ndarray._wrap(arr._array.reshape(new_shape), _dtype=_dtype)
+        arr = ndarray._wrap(arr._array.reshape(new_shape), _dtype=_dtype, _fields=_fields, _raw_data=_raw_data)
     return arr
 
 
