@@ -1897,30 +1897,95 @@ fn median(a: &NdArray) -> PyResult<NdArray> {
 }
 
 #[pyfunction]
-fn percentile(a: &NdArray, q: f64) -> PyResult<NdArray> {
+#[pyo3(signature = (x, q, axis=None, keepdims=false))]
+fn percentile(x: &NdArray, q: f64, axis: Option<isize>, keepdims: bool) -> PyResult<NdArray> {
     if q < 0.0 || q > 100.0 {
         return Err(PyValueError::new_err("Percentile must be between 0 and 100"));
     }
-    let mut values: Vec<f64> = a.data.iter().copied().collect();
-    if values.is_empty() {
-        return Err(PyValueError::new_err("Cannot compute percentile of empty array"));
+
+    match axis {
+        None => {
+            let mut values: Vec<f64> = x.data.iter().copied().collect();
+            if values.is_empty() {
+                return Err(PyValueError::new_err("Cannot compute percentile of empty array"));
+            }
+            values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let len = values.len();
+            let idx = q / 100.0 * (len - 1) as f64;
+            let lower = idx.floor() as usize;
+            let upper = idx.ceil() as usize;
+            if lower == upper || upper >= len {
+                let val = values[lower.min(len - 1)];
+                return Ok(NdArray {
+                    data: Array::from_elem(IxDyn(&[]), val),
+                });
+            }
+            let frac = idx - lower as f64;
+            let val = values[lower] * (1.0 - frac) + values[upper] * frac;
+            Ok(NdArray {
+                data: Array::from_elem(IxDyn(&[]), val),
+            })
+        }
+        Some(ax) => {
+            let ndim = x.data.ndim();
+            let ax = if ax < 0 { (ndim as isize + ax) as usize } else { ax as usize };
+            
+            let nrows = x.data.shape()[0];
+            let ncols = x.data.shape()[1];
+            
+            let result: Vec<f64>;
+            
+            if ax == 0 {
+                result = (0..ncols)
+                    .map(|c| {
+                        let mut values: Vec<f64> = (0..nrows)
+                            .map(|r| x.data[[r, c]])
+                            .collect();
+                        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                        let len = values.len();
+                        let idx = q / 100.0 * (len - 1) as f64;
+                        let lower = idx.floor() as usize;
+                        let upper = idx.ceil() as usize;
+                        if lower == upper || upper >= len {
+                            values[lower.min(len - 1)]
+                        } else {
+                            let frac = idx - lower as f64;
+                            values[lower] * (1.0 - frac) + values[upper] * frac
+                        }
+                    })
+                    .collect();
+            } else {
+                result = (0..nrows)
+                    .map(|r| {
+                        let mut values: Vec<f64> = (0..ncols)
+                            .map(|c| x.data[[r, c]])
+                            .collect();
+                        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                        let len = values.len();
+                        let idx = q / 100.0 * (len - 1) as f64;
+                        let lower = idx.floor() as usize;
+                        let upper = idx.ceil() as usize;
+                        if lower == upper || upper >= len {
+                            values[lower.min(len - 1)]
+                        } else {
+                            let frac = idx - lower as f64;
+                            values[lower] * (1.0 - frac) + values[upper] * frac
+                        }
+                    })
+                    .collect();
+            }
+            
+            let mut new_shape: Vec<usize> = x.data.shape().iter().copied().collect();
+            if keepdims {
+                new_shape[ax] = 1;
+            } else {
+                new_shape.remove(ax);
+            }
+            let result_arr = Array::from_shape_vec(IxDyn(&new_shape), result)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            Ok(NdArray { data: result_arr })
+        }
     }
-    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let len = values.len();
-    let idx = q / 100.0 * (len - 1) as f64;
-    let lower = idx.floor() as usize;
-    let upper = idx.ceil() as usize;
-    if lower == upper || upper >= len {
-        let val = values[lower.min(len - 1)];
-        return Ok(NdArray {
-            data: Array::from_elem(IxDyn(&[]), val),
-        });
-    }
-    let frac = idx - lower as f64;
-    let val = values[lower] * (1.0 - frac) + values[upper] * frac;
-    Ok(NdArray {
-        data: Array::from_elem(IxDyn(&[]), val),
-    })
 }
 
 #[pyfunction]

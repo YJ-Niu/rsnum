@@ -86,8 +86,8 @@ def median(a, axis=None, out=None, keepdims=False):
 
 def percentile(a, q, axis=None, out=None, keepdims=False, interpolation='linear'):
     """计算数组的百分位数。"""
-    _ = axis, out, keepdims, interpolation
-    return _wrap(_core.percentile(_ensure_raw(a), q))
+    _ = out, interpolation
+    return _wrap(_core.percentile(_ensure_raw(a), q, axis, keepdims))
 
 
 def quantile(a, q, axis=None, out=None, keepdims=False, interpolation='linear'):
