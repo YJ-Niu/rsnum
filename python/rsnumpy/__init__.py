@@ -448,6 +448,15 @@ class ndarray:
         """返回数组元素的扁平迭代器，逐个访问每个元素。"""
         return _NdFlatIter(self)
 
+    @flat.setter
+    def flat(self, values):
+        """设置数组元素的扁平值。"""
+        size = self.size
+        flat_values = list(values)
+        indices = _core.ndarray(list(range(size)))
+        vals = _core.ndarray([float(v) for v in flat_values])
+        self._array.put(indices, vals)
+
     @property
     def real(self):
         """数组的实部。"""
@@ -1751,6 +1760,115 @@ def iscomplex(x):
     # 不是复数数组 → 全零
     shape = arr.shape
     return ndarray(_core.zeros(shape))
+
+
+def _broadcast_shape(*shapes):
+    """计算多个数组的广播形状。"""
+    max_ndim = builtins.max(len(s) for s in shapes)
+    result = []
+    for i in range(max_ndim):
+        dims = set()
+        for s in shapes:
+            if i < max_ndim - len(s):
+                dims.add(1)
+            else:
+                dims.add(s[i - (max_ndim - len(s))])
+        non_one = [d for d in dims if d != 1]
+        if len(non_one) > 1:
+            raise ValueError("operands could not be broadcast together")
+        result.append(non_one[0] if non_one else 1)
+    return tuple(result)
+
+
+def broadcast(*args):
+    """产生模仿广播的对象，将多个数组广播到相同形状。"""
+    if not args:
+        raise ValueError("broadcast requires at least one argument")
+    return _Broadcast(*args)
+
+
+class _Broadcast:
+    """广播对象，将多个数组广播到相同形状。"""
+
+    def __init__(self, *args):
+        self._arrays = [ndarray(a) for a in args]
+        # 计算广播形状
+        shapes = [a.shape for a in self._arrays]
+        self._shape = _broadcast_shape(*shapes)
+        self._size = 1
+        for s in self._shape:
+            self._size *= s
+
+    @property
+    def shape(self):
+        """广播后的形状。"""
+        return self._shape
+
+    @property
+    def iters(self):
+        """返回各数组的迭代器元组。"""
+        return tuple(_BroadcastIter(a, self._shape) for a in self._arrays)
+
+    def __iter__(self):
+        """迭代广播后的值元组。"""
+        iters = self.iters
+        for _ in range(self._size):
+            yield tuple(next(it) for it in iters)
+
+
+class _BroadcastIter:
+    """广播迭代器，按广播形状遍历单个数组。"""
+
+    def __init__(self, arr, shape):
+        self._arr = arr
+        self._flat = arr._array.flatten().tolist()
+        self._size = len(self._flat)
+        self._arr_shape = arr.shape
+        self._broadcast_shape = shape
+        # Left-pad array shape for broadcasting
+        ndim_pad = len(shape) - len(arr.shape)
+        self._padded = (1,) * ndim_pad + arr.shape
+        self._indices = [0] * len(shape)
+        self._done = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._done:
+            raise StopIteration
+        # Map broadcast index to flat array index
+        arr_idx = 0
+        stride = 1
+        for d in range(len(self._arr_shape) - 1, -1, -1):
+            dim = self._indices[len(self._broadcast_shape) - len(self._arr_shape) + d]
+            dim = dim % self._arr_shape[d]
+            arr_idx += dim * stride
+            stride *= self._arr_shape[d]
+        val = self._flat[arr_idx]
+
+        # Advance to next C-order position
+        for i in range(len(self._indices) - 1, -1, -1):
+            self._indices[i] += 1
+            if self._indices[i] < self._broadcast_shape[i]:
+                break
+            self._indices[i] = 0
+            if i == 0:
+                self._done = True
+
+        dtype = getattr(self._arr, '_dtype', 'float64')
+        if dtype == 'int64':
+            return int(val)
+        return float(val)
+
+    def _ravel_c(self, *indices):
+        """将多维索引转为扁平索引（C-order）。"""
+        idx = 0
+        stride = 1
+        for i in range(len(self._arr_shape) - 1, -1, -1):
+            idx += indices[i] * stride
+            stride *= self._arr_shape[i]
+        return idx
 
 
 # 数组操作函数

@@ -44,6 +44,10 @@ class random_module:
         """生成均匀分布的随机数。"""
         return self._random.uniform(low, high, size)
     
+    def random(self, size=None):
+        """生成 [0.0, 1.0) 区间均匀分布的随机数。"""
+        return self._random.uniform(0.0, 1.0, size)
+    
     def normal(self, loc=0.0, scale=1.0, size=None):
         """生成正态分布的随机数。"""
         from ..__init__ import ndarray

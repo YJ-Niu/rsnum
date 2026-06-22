@@ -48,7 +48,13 @@ def rollaxis(a, axis, start=0):
 
 def broadcast_to(a, shape):
     """将数组广播到新形状。"""
-    return _wrap(_core.broadcast_to(_ensure_raw(a), shape))
+    arr = a if hasattr(a, '_array') else _wrap(a)
+    nd = _nd()
+    dtype = getattr(arr, '_dtype', "float64")
+    fields = getattr(arr, '_fields', None)
+    raw_data = getattr(arr, '_raw_data', None)
+    result = _core.broadcast_to(arr._array, shape)
+    return nd._wrap(result, _dtype=dtype, _fields=fields, _raw_data=raw_data)
 
 
 def transpose(a, axes=None):
@@ -75,57 +81,125 @@ def swapaxes(a, axis1, axis2):
 
 def expand_dims(a, axis):
     """扩展数组的形状。"""
-    return _wrap(_core.expand_dims(_ensure_raw(a), axis))
+    arr = a if hasattr(a, '_array') else _wrap(a)
+    nd = _nd()
+    dtype = getattr(arr, '_dtype', "float64")
+    fields = getattr(arr, '_fields', None)
+    raw_data = getattr(arr, '_raw_data', None)
+    result = _core.expand_dims(arr._array, axis)
+    return nd._wrap(result, _dtype=dtype, _fields=fields, _raw_data=raw_data)
 
 
 def squeeze(a, axis=None):
     """从数组形状中删除单维度条目。"""
-    return _wrap(_core.squeeze(_ensure_raw(a)))
+    arr = a if hasattr(a, '_array') else _wrap(a)
+    nd = _nd()
+    dtype = getattr(arr, '_dtype', "float64")
+    fields = getattr(arr, '_fields', None)
+    raw_data = getattr(arr, '_raw_data', None)
+    result = _core.squeeze(arr._array)
+    return nd._wrap(result, _dtype=dtype, _fields=fields, _raw_data=raw_data)
 
 
 def concatenate(arrays, axis=0):
     """沿着指定轴连接数组。"""
-    arr_list = [_ensure_raw(a) for a in arrays]
-    return _wrap(_core.concatenate(arr_list, axis))
+    arr_list = list(arrays)
+    if not arr_list:
+        raise ValueError("concatenate requires at least one array")
+    first = arr_list[0] if hasattr(arr_list[0], '_array') else _wrap(arr_list[0])
+    nd = _nd()
+    dtype = getattr(first, '_dtype', "float64")
+    fields = getattr(first, '_fields', None)
+    raw_data = getattr(first, '_raw_data', None)
+    raw_list = [a._array if hasattr(a, '_array') else _core.ndarray(a) for a in arr_list]
+    result = _core.concatenate(raw_list, axis)
+    return nd._wrap(result, _dtype=dtype, _fields=fields, _raw_data=raw_data)
 
 
 def stack(arrays, axis=0):
     """沿着新轴堆叠数组。"""
-    arr_list = [_ensure_raw(a) for a in arrays]
-    return _wrap(_core.stack(arr_list, axis))
+    arr_list = list(arrays)
+    if not arr_list:
+        raise ValueError("stack requires at least one array")
+    first = arr_list[0] if hasattr(arr_list[0], '_array') else _wrap(arr_list[0])
+    nd = _nd()
+    dtype = getattr(first, '_dtype', "float64")
+    fields = getattr(first, '_fields', None)
+    raw_data = getattr(first, '_raw_data', None)
+    raw_list = [a._array if hasattr(a, '_array') else _core.ndarray(a) for a in arr_list]
+    result = _core.stack(raw_list, axis)
+    return nd._wrap(result, _dtype=dtype, _fields=fields, _raw_data=raw_data)
 
 
 def vstack(arrays):
     """垂直堆叠数组（沿行）。"""
-    arr_list = [_ensure_raw(a) for a in arrays]
-    return _wrap(_core.vstack(arr_list))
+    arr_list = list(arrays)
+    if not arr_list:
+        raise ValueError("vstack requires at least one array")
+    first = arr_list[0] if hasattr(arr_list[0], '_array') else _wrap(arr_list[0])
+    nd = _nd()
+    dtype = getattr(first, '_dtype', "float64")
+    fields = getattr(first, '_fields', None)
+    raw_data = getattr(first, '_raw_data', None)
+    raw_list = [a._array if hasattr(a, '_array') else _core.ndarray(a) for a in arr_list]
+    result = _core.vstack(raw_list)
+    return nd._wrap(result, _dtype=dtype, _fields=fields, _raw_data=raw_data)
 
 
 def hstack(arrays):
     """水平堆叠数组（沿列）。"""
-    arr_list = [_ensure_raw(a) for a in arrays]
-    return _wrap(_core.hstack(arr_list))
+    arr_list = list(arrays)
+    if not arr_list:
+        raise ValueError("hstack requires at least one array")
+    first = arr_list[0] if hasattr(arr_list[0], '_array') else _wrap(arr_list[0])
+    nd = _nd()
+    dtype = getattr(first, '_dtype', "float64")
+    fields = getattr(first, '_fields', None)
+    raw_data = getattr(first, '_raw_data', None)
+    raw_list = [a._array if hasattr(a, '_array') else _core.ndarray(a) for a in arr_list]
+    result = _core.hstack(raw_list)
+    return nd._wrap(result, _dtype=dtype, _fields=fields, _raw_data=raw_data)
 
 
 def dstack(arrays):
     """沿深度方向堆叠数组。"""
-    arr_list = [_ensure_raw(a) for a in arrays]
-    result_raw = _core.concatenate(arr_list, 2)
-    return _wrap(result_raw)
+    arr_list = list(arrays)
+    if not arr_list:
+        raise ValueError("dstack requires at least one array")
+    first = arr_list[0] if hasattr(arr_list[0], '_array') else _wrap(arr_list[0])
+    nd = _nd()
+    dtype = getattr(first, '_dtype', "float64")
+    fields = getattr(first, '_fields', None)
+    raw_data = getattr(first, '_raw_data', None)
+    raw_list = [a._array if hasattr(a, '_array') else _core.ndarray(a) for a in arr_list]
+    result = _core.concatenate(raw_list, 2)
+    return nd._wrap(result, _dtype=dtype, _fields=fields, _raw_data=raw_data)
 
 
 def column_stack(arrays):
     """将 1-D 数组作为列堆叠成 2-D 数组。"""
-    arr_list = [_ensure_raw(a) for a in arrays]
-    return _wrap(_core.column_stack(arr_list))
+    arr_list = list(arrays)
+    if not arr_list:
+        raise ValueError("column_stack requires at least one array")
+    first = arr_list[0] if hasattr(arr_list[0], '_array') else _wrap(arr_list[0])
+    nd = _nd()
+    dtype = getattr(first, '_dtype', "float64")
+    fields = getattr(first, '_fields', None)
+    raw_data = getattr(first, '_raw_data', None)
+    raw_list = [a._array if hasattr(a, '_array') else _core.ndarray(a) for a in arr_list]
+    result = _core.column_stack(raw_list)
+    return nd._wrap(result, _dtype=dtype, _fields=fields, _raw_data=raw_data)
 
 
 def split(ary, indices_or_sections, axis=0):
     """将数组拆分为多个子数组（使用 Rust 实现）。"""
-    raw = _ensure_raw(ary)
-    sections = indices_or_sections
-    result_raw = _core.split_rs(raw, sections, axis)
-    return [_wrap(r) for r in result_raw]
+    arr = ary if hasattr(ary, '_array') else _wrap(ary)
+    nd = _nd()
+    dtype = getattr(arr, '_dtype', "float64")
+    fields = getattr(arr, '_fields', None)
+    raw_data = getattr(arr, '_raw_data', None)
+    result_raw = _core.split_rs(arr._array, indices_or_sections, axis)
+    return [nd._wrap(r, _dtype=dtype, _fields=fields, _raw_data=raw_data) for r in result_raw]
 
 
 def hsplit(ary, indices_or_sections):

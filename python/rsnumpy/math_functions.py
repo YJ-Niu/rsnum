@@ -15,6 +15,8 @@ def _wrap(result):
 def _ensure_raw(a):
     if hasattr(a, '_array'):
         return a._array
+    if hasattr(a, '__class__') and a.__class__.__name__ == 'ndarray':
+        return a
     return _core.ndarray(a)
 
 

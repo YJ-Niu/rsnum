@@ -2864,9 +2864,9 @@ fn split_rs(a: &NdArray, indices_or_sections: &Bound<'_, PyAny>, axis: isize) ->
     let sections: Vec<usize> = if let Ok(n) = indices_or_sections.extract::<usize>() {
         (1..n).map(|i| (axis_size * i) / n).collect()
     } else if let Ok(indices) = indices_or_sections.extract::<Vec<isize>>() {
-        indices.iter().map(|&v| if v < 0 { (axis_size as isize + v) as usize } else { v as usize }).collect()
+        indices.iter().map(|&v| if v < 0 { (axis_size as isize + v) as usize } else { v as usize }).filter(|&v| v <= axis_size).collect()
     } else if let Ok(indices) = indices_or_sections.extract::<Vec<i64>>() {
-        indices.iter().map(|&v| if v < 0 { (axis_size as i64 + v) as usize } else { v as usize }).collect()
+        indices.iter().map(|&v| if v < 0 { (axis_size as i64 + v) as usize } else { v as usize }).filter(|&v| v <= axis_size).collect()
     } else {
         vec![]
     };
@@ -2874,6 +2874,8 @@ fn split_rs(a: &NdArray, indices_or_sections: &Bound<'_, PyAny>, axis: isize) ->
     let mut split_points = sections.clone();
     split_points.push(axis_size);
     split_points.insert(0, 0);
+    // 去重并保持顺序
+    split_points.dedup();
 
     let pre: usize = shape.iter().take(ax).product();
     let post: usize = shape.iter().skip(ax + 1).product();
@@ -2881,12 +2883,19 @@ fn split_rs(a: &NdArray, indices_or_sections: &Bound<'_, PyAny>, axis: isize) ->
 
     let mut result = Vec::new();
     for i in 0..split_points.len() - 1 {
-        let start = split_points[i];
+        let start = split_points[i].min(axis_size);
         let end = split_points[i + 1].min(axis_size);
-        let section_size = end - start;
-        if section_size == 0 {
+        if start >= end {
+            // 生成空的切片
+            let mut empty_shape = shape.clone();
+            empty_shape[ax] = 0;
+            let section_data: Vec<f64> = Vec::new();
+            let arr = Array::from_shape_vec(IxDyn(&empty_shape), section_data)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            result.push(NdArray { data: arr });
             continue;
         }
+        let section_size = end - start;
         let mut new_shape = shape.clone();
         new_shape[ax] = section_size;
         let total: usize = pre * section_size * post;
