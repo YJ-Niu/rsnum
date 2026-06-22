@@ -50,6 +50,10 @@ def max(a, axis=None, out=None, keepdims=False, initial=None, where=True):
     return _wrap(_core.max(_ensure_raw(a), axis))
 
 
+amin = min  # min 的别名，计算数组中的最小值
+amax = max  # max 的别名，计算数组中的最大值
+
+
 def ptp(a, axis=None, out=None, keepdims=False):
     """计算数组元素的峰-峰值（最大值-最小值）。"""
     return _wrap(_core.ptp(_ensure_raw(a)))

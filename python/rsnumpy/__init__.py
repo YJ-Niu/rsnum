@@ -2121,6 +2121,8 @@ std = _statistics_module.std
 var = _statistics_module.var
 min = _statistics_module.min
 max = _statistics_module.max
+amin = _statistics_module.amin
+amax = _statistics_module.amax
 ptp = _statistics_module.ptp
 median = _statistics_module.median
 percentile = _statistics_module.percentile
@@ -2173,7 +2175,7 @@ __all__ = [
     'sqrt', 'square', 'cbrt', 'abs', 'sign', 'reciprocal', 'clip', 'sinc', 'heaviside',
     'add', 'subtract', 'multiply', 'divide', 'power', 'mod', 'remainder',
     'greater', 'less', 'equal', 'logical_and', 'logical_or', 'isclose', 'allclose',
-    'sum', 'mean', 'std', 'var', 'min', 'max', 'ptp',
+    'sum', 'mean', 'std', 'var', 'min', 'max', 'amin', 'amax', 'ptp',
     'median', 'percentile', 'quantile', 'nanmedian', 'nanpercentile',
     'argmax', 'argmin', 'argsort', 'sort', 'searchsorted',
     'cov', 'corrcoef',
