@@ -26,6 +26,7 @@ from .io import save, load, loadtxt, savetxt, savez, load_npz
 from .polynomial import Poly, polyval, polyfit, polyder, polyint, polyroots
 from .linalg import linalg_module as _linalg_module
 from .random import random_module as _random_module
+from . import char as _char_module
 
 
 class ArrayFlags:
@@ -144,10 +145,23 @@ class ndarray:
         obj._raw_data = _raw_data
         return obj
 
+    def _wrap_raw(raw_data):
+        """包装原始 Python 数据（如字符串列表）到 ndarray。"""
+        obj = ndarray.__new__(ndarray)
+        obj._array = _core.zeros((len(raw_data),))
+        obj._dtype = "string_"
+        obj._raw_data = list(raw_data)
+        return obj
+
     def __repr__(self):
         fields = getattr(self, '_fields', None)
         if fields:
             return _format_structured_repr(self)
+        if getattr(self, '_dtype', "float64") == "string_":
+            raw_data = getattr(self, '_raw_data', None)
+            if raw_data is not None:
+                val_strs = [repr(x) for x in raw_data]
+                return "array([" + " ".join(val_strs) + "])"
         raw = getattr(self, '_raw_data', None)
         if raw is not None:
             return _format_ragged_repr(self)
@@ -166,6 +180,12 @@ class ndarray:
         fields = getattr(self, '_fields', None)
         if fields:
             return _format_structured_str(self)
+        if getattr(self, '_dtype', "float64") == "string_":
+            raw_data = getattr(self, '_raw_data', None)
+            if raw_data is not None:
+                val_strs = [repr(x) for x in raw_data]
+                return "[" + " ".join(val_strs) + "]"
+            return str(raw_data)
         raw = getattr(self, '_raw_data', None)
         if raw is not None:
             return _format_ragged_str(self)
@@ -209,6 +229,10 @@ class ndarray:
             return _convert_nested(raw_list, bool)
         if dt in ('uint8', 'uint16', 'uint32', 'uint64'):
             return _convert_nested(raw_list, int)
+        if dt == 'string_':
+            raw = getattr(self, '_raw_data', None)
+            if raw is not None:
+                return list(raw)
         return raw_list
 
     def __bool__(self):
@@ -1082,6 +1106,8 @@ float32 = type('float32', (), {})
 float64 = type('float64', (), {})
 complex64 = type('complex64', (), {})
 complex128 = type('complex128', (), {})
+string_ = type('string_', (), {})
+unicode_ = type('unicode_', (), {})
 
 
 # ========== 构造/工厂函数 ==========
@@ -1573,6 +1599,10 @@ nan = float('nan')
 newaxis = None
 
 
+# 字符串操作模块
+char = _char_module
+
+
 # ========== 判断函数 ==========
 
 class _NdFlatIter:
@@ -1994,6 +2024,7 @@ def bitwise_not(x):
         r = _core.bitwise_not(r)
     return _wrap_result(r, dt)
 
+
 def invert(x):
     """按位取反（等效于 ~ 运算符，对布尔数组使用逻辑取反）"""
     r, dt = _to_raw(x)
@@ -2126,6 +2157,7 @@ __all__ = [
     'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh',
     'bitwise_and', 'bitwise_or', 'bitwise_xor', 'bitwise_not',
     'invert', 'left_shift', 'right_shift',
+    'string_', 'unicode_', 'char',
     'exp', 'expm1', 'log', 'log10', 'log2', 'log1p',
     'around', 'floor', 'ceil', 'trunc', 'fix',
     'sqrt', 'square', 'cbrt', 'abs', 'sign', 'clip', 'sinc', 'heaviside',
