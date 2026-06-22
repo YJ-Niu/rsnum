@@ -2295,6 +2295,61 @@ fn invert(x: &NdArray) -> NdArray {
 }
 
 #[pyfunction]
+fn bitwise_and(x1: &NdArray, x2: &NdArray) -> PyResult<NdArray> {
+    let result = broadcast_binary_op(&x1.data, &x2.data, |a, b| {
+        let bits = a.to_bits() as i64 & b.to_bits() as i64;
+        f64::from_bits(bits as u64)
+    })?;
+    Ok(NdArray { data: result })
+}
+
+#[pyfunction]
+fn bitwise_or(x1: &NdArray, x2: &NdArray) -> PyResult<NdArray> {
+    let result = broadcast_binary_op(&x1.data, &x2.data, |a, b| {
+        let bits = a.to_bits() as i64 | b.to_bits() as i64;
+        f64::from_bits(bits as u64)
+    })?;
+    Ok(NdArray { data: result })
+}
+
+#[pyfunction]
+fn bitwise_xor(x1: &NdArray, x2: &NdArray) -> PyResult<NdArray> {
+    let result = broadcast_binary_op(&x1.data, &x2.data, |a, b| {
+        let bits = a.to_bits() as i64 ^ b.to_bits() as i64;
+        f64::from_bits(bits as u64)
+    })?;
+    Ok(NdArray { data: result })
+}
+
+#[pyfunction]
+fn left_shift(x1: &NdArray, x2: &NdArray) -> PyResult<NdArray> {
+    let result = broadcast_binary_op(&x1.data, &x2.data, |a, b| {
+        let bits = (a.to_bits() as i64) << (b as i64);
+        f64::from_bits(bits as u64)
+    })?;
+    Ok(NdArray { data: result })
+}
+
+#[pyfunction]
+fn right_shift(x1: &NdArray, x2: &NdArray) -> PyResult<NdArray> {
+    let result = broadcast_binary_op(&x1.data, &x2.data, |a, b| {
+        let bits = (a.to_bits() as i64) >> (b as i64);
+        f64::from_bits(bits as u64)
+    })?;
+    Ok(NdArray { data: result })
+}
+
+#[pyfunction]
+fn bitwise_not(x: &NdArray) -> NdArray {
+    NdArray {
+        data: x.data.mapv(|v| {
+            let bits = !(v.to_bits() as i64);
+            f64::from_bits(bits as u64)
+        }),
+    }
+}
+
+#[pyfunction]
 fn maximum(x1: &NdArray, x2: &NdArray) -> PyResult<NdArray> {
     let result = broadcast_binary_op(&x1.data, &x2.data, |a, b| a.max(b))?;
     Ok(NdArray { data: result })
@@ -4160,6 +4215,12 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(isinf, m)?)?;
     m.add_function(wrap_pyfunction!(isfinite, m)?)?;
     m.add_function(wrap_pyfunction!(invert, m)?)?;
+    m.add_function(wrap_pyfunction!(bitwise_and, m)?)?;
+    m.add_function(wrap_pyfunction!(bitwise_or, m)?)?;
+    m.add_function(wrap_pyfunction!(bitwise_xor, m)?)?;
+    m.add_function(wrap_pyfunction!(bitwise_not, m)?)?;
+    m.add_function(wrap_pyfunction!(left_shift, m)?)?;
+    m.add_function(wrap_pyfunction!(right_shift, m)?)?;
     m.add_function(wrap_pyfunction!(maximum, m)?)?;
     m.add_function(wrap_pyfunction!(minimum, m)?)?;
     m.add_function(wrap_pyfunction!(allclose, m)?)?;

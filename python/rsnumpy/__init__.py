@@ -346,6 +346,36 @@ class ndarray:
             return _wrap_result(_core.round(self._array, 0), self._dtype)
         return _wrap_result(_core.round(self._array, ndigits), self._dtype)
 
+    def __and__(self, other):
+        """按位与（& 运算符）。"""
+        if _is_ndarray(other):
+            return _wrap_result(_core.bitwise_and(self._array, other._array), self._dtype)
+        return _wrap_result(_core.bitwise_and(self._array, _ensure(other)), self._dtype)
+
+    def __or__(self, other):
+        """按位或（| 运算符）。"""
+        if _is_ndarray(other):
+            return _wrap_result(_core.bitwise_or(self._array, other._array), self._dtype)
+        return _wrap_result(_core.bitwise_or(self._array, _ensure(other)), self._dtype)
+
+    def __xor__(self, other):
+        """按位异或（^ 运算符）。"""
+        if _is_ndarray(other):
+            return _wrap_result(_core.bitwise_xor(self._array, other._array), self._dtype)
+        return _wrap_result(_core.bitwise_xor(self._array, _ensure(other)), self._dtype)
+
+    def __lshift__(self, other):
+        """左移（<< 运算符）。"""
+        if _is_ndarray(other):
+            return _wrap_result(_core.left_shift(self._array, other._array), self._dtype)
+        return _wrap_result(_core.left_shift(self._array, _ensure(other)), self._dtype)
+
+    def __rshift__(self, other):
+        """右移（>> 运算符）。"""
+        if _is_ndarray(other):
+            return _wrap_result(_core.right_shift(self._array, other._array), self._dtype)
+        return _wrap_result(_core.right_shift(self._array, _ensure(other)), self._dtype)
+
     # ========== 属性 ==========
 
     @property
@@ -1913,6 +1943,47 @@ delete = _array_ops_module.delete
 unique = _array_ops_module.unique
 resize = _array_ops_module.resize
 
+# 位运算
+def bitwise_and(x1, x2):
+    """按位与"""
+    a1 = x1 if hasattr(x1, '_array') else _core.ndarray(x1)
+    a2 = x2 if hasattr(x2, '_array') else _core.ndarray(x2)
+    return _wrap_result(_core.bitwise_and(a1._array, a2._array), a1._dtype)
+
+def bitwise_or(x1, x2):
+    """按位或"""
+    a1 = x1 if hasattr(x1, '_array') else _core.ndarray(x1)
+    a2 = x2 if hasattr(x2, '_array') else _core.ndarray(x2)
+    return _wrap_result(_core.bitwise_or(a1._array, a2._array), a1._dtype)
+
+def bitwise_xor(x1, x2):
+    """按位异或"""
+    a1 = x1 if hasattr(x1, '_array') else _core.ndarray(x1)
+    a2 = x2 if hasattr(x2, '_array') else _core.ndarray(x2)
+    return _wrap_result(_core.bitwise_xor(a1._array, a2._array), a1._dtype)
+
+def bitwise_not(x):
+    """按位取反"""
+    a = x if hasattr(x, '_array') else _core.ndarray(x)
+    return _wrap_result(_core.bitwise_not(a._array), a._dtype)
+
+def invert(x):
+    """逻辑取反（0→1, 1→0）"""
+    a = x if hasattr(x, '_array') else _core.ndarray(x)
+    return _wrap_result(_core.invert(a._array), a._dtype)
+
+def left_shift(x1, x2):
+    """左移"""
+    a1 = x1 if hasattr(x1, '_array') else _core.ndarray(x1)
+    a2 = x2 if hasattr(x2, '_array') else _core.ndarray(x2)
+    return _wrap_result(_core.left_shift(a1._array, a2._array), a1._dtype)
+
+def right_shift(x1, x2):
+    """右移"""
+    a1 = x1 if hasattr(x1, '_array') else _core.ndarray(x1)
+    a2 = x2 if hasattr(x2, '_array') else _core.ndarray(x2)
+    return _wrap_result(_core.right_shift(a1._array, a2._array), a1._dtype)
+
 # 数学函数
 sin = _math_functions_module.sin
 cos = _math_functions_module.cos
@@ -2017,6 +2088,8 @@ __all__ = [
     'sin', 'cos', 'tan', 'arcsin', 'arccos', 'arctan', 'arctan2',
     'deg2rad', 'rad2deg',
     'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh',
+    'bitwise_and', 'bitwise_or', 'bitwise_xor', 'bitwise_not',
+    'invert', 'left_shift', 'right_shift',
     'exp', 'expm1', 'log', 'log10', 'log2', 'log1p',
     'around', 'floor', 'ceil', 'trunc', 'fix',
     'sqrt', 'square', 'cbrt', 'abs', 'sign', 'clip', 'sinc', 'heaviside',
