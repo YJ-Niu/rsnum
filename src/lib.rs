@@ -1879,21 +1879,73 @@ fn argsort(a: &NdArray, axis: isize) -> PyResult<NdArray> {
 }
 
 #[pyfunction]
-fn median(a: &NdArray) -> PyResult<NdArray> {
-    let mut values: Vec<f64> = a.data.iter().copied().collect();
-    if values.is_empty() {
-        return Err(PyValueError::new_err("Cannot compute median of empty array"));
+#[pyo3(signature = (x, axis=None))]
+fn median(x: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
+    match axis {
+        None => {
+            let mut values: Vec<f64> = x.data.iter().copied().collect();
+            if values.is_empty() {
+                return Err(PyValueError::new_err("Cannot compute median of empty array"));
+            }
+            values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let len = values.len();
+            let median_val = if len % 2 == 0 {
+                (values[len / 2 - 1] + values[len / 2]) / 2.0
+            } else {
+                values[len / 2]
+            };
+            Ok(NdArray {
+                data: Array::from_elem(IxDyn(&[]), median_val),
+            })
+        }
+        Some(ax) => {
+            let ndim = x.data.ndim();
+            let ax = if ax < 0 { (ndim as isize + ax) as usize } else { ax as usize };
+            
+            let nrows = x.data.shape()[0];
+            let ncols = x.data.shape()[1];
+            
+            let result: Vec<f64>;
+            
+            if ax == 0 {
+                result = (0..ncols)
+                    .map(|c| {
+                        let mut values: Vec<f64> = (0..nrows)
+                            .map(|r| x.data[[r, c]])
+                            .collect();
+                        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                        let len = values.len();
+                        if len % 2 == 0 {
+                            (values[len / 2 - 1] + values[len / 2]) / 2.0
+                        } else {
+                            values[len / 2]
+                        }
+                    })
+                    .collect();
+            } else {
+                result = (0..nrows)
+                    .map(|r| {
+                        let mut values: Vec<f64> = (0..ncols)
+                            .map(|c| x.data[[r, c]])
+                            .collect();
+                        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                        let len = values.len();
+                        if len % 2 == 0 {
+                            (values[len / 2 - 1] + values[len / 2]) / 2.0
+                        } else {
+                            values[len / 2]
+                        }
+                    })
+                    .collect();
+            }
+            
+            let mut new_shape: Vec<usize> = x.data.shape().iter().copied().collect();
+            new_shape.remove(ax);
+            let result_arr = Array::from_shape_vec(IxDyn(&new_shape), result)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            Ok(NdArray { data: result_arr })
+        }
     }
-    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let len = values.len();
-    let median_val = if len % 2 == 0 {
-        (values[len / 2 - 1] + values[len / 2]) / 2.0
-    } else {
-        values[len / 2]
-    };
-    Ok(NdArray {
-        data: Array::from_elem(IxDyn(&[]), median_val),
-    })
 }
 
 #[pyfunction]

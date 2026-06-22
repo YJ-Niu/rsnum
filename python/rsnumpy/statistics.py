@@ -80,8 +80,8 @@ def ptp(a, axis=None, out=None, keepdims=False):
 
 def median(a, axis=None, out=None, keepdims=False):
     """计算数组的中位数。"""
-    _ = axis, out, keepdims
-    return _wrap(_core.median(_ensure_raw(a)))
+    _ = out, keepdims
+    return _wrap(_core.median(_ensure_raw(a), axis))
 
 
 def percentile(a, q, axis=None, out=None, keepdims=False, interpolation='linear'):
