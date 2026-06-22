@@ -177,14 +177,22 @@ fn format_float_scalar(val: f64) -> String {
     if val.is_infinite() {
         return if val > 0.0 { "inf".to_string() } else { "-inf".to_string() };
     }
-    if val == val.floor() && val.is_finite() && val.abs() < 1e16 {
-        let v = val as i64;
-        if v as f64 == val {
-            // 整数浮点数显示小数点，如 0. 1. -3.
+    let val_rounded = (val * 1e10).round() / 1e10;
+    if val_rounded == val_rounded.floor() && val_rounded.is_finite() && val_rounded.abs() < 1e16 {
+        let v = val_rounded as i64;
+        if v as f64 == val_rounded {
             return format!("{}.", v);
         }
     }
-    format!("{}", val)
+    if val_rounded.abs() >= 1e10 || (val_rounded.abs() < 1e-10 && val_rounded != 0.0) {
+        return format!("{:.10e}", val_rounded);
+    }
+    let s = format!("{:.10}", val_rounded);
+    if let Some(pos) = s.find('.') {
+        s[..pos + 1 + s[pos + 1..].trim_end_matches('0').len()].to_string()
+    } else {
+        s
+    }
 }
 
 /// NdArray: 类似 NumPy ndarray 的多维数组

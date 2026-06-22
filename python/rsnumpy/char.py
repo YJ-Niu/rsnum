@@ -8,6 +8,8 @@ def _get_strings(a):
     """从 ndarray 或列表中提取字符串列表。"""
     if isinstance(a, str):
         return [a]
+    if isinstance(a, bytes):
+        return [a]
     if hasattr(a, '_raw_data'):
         return list(a._raw_data)
     if hasattr(a, '_array') or hasattr(a, 'tolist'):
@@ -92,6 +94,8 @@ def split(a, sep=None, maxsplit=None):
         result = [x.split(sep, maxsplit) for x in s]
     else:
         result = [x.split(sep) for x in s]
+    if isinstance(a, str):
+        return result[0]
     return _make_result(result)
 
 
@@ -99,6 +103,8 @@ def splitlines(a, keepends=False):
     """返回元素中的行列表，以换行符分割。"""
     s = _get_strings(a)
     result = [x.splitlines(keepends) for x in s]
+    if isinstance(a, str):
+        return result[0]
     return _make_result(result)
 
 
@@ -106,13 +112,26 @@ def strip(a, chars=None):
     """移除元素开头或者结尾处的特定字符。"""
     s = _get_strings(a)
     result = [x.strip(chars) for x in s]
+    if isinstance(a, str):
+        return result[0]
     return _make_result(result)
 
 
-def join(a, sep):
-    """通过指定分隔符来连接数组中的元素。"""
+def join(sep, a):
+    """通过指定分隔符来连接数组中的元素或字符串。"""
+    seps = _get_strings(sep)
     s = _get_strings(a)
-    result = [sep.join(x) if isinstance(x, (list, tuple)) else x for x in s]
+    result = []
+    for i, x in enumerate(s):
+        current_sep = seps[i % len(seps)]
+        if isinstance(x, (list, tuple)):
+            result.append(current_sep.join(x))
+        elif isinstance(x, str):
+            result.append(current_sep.join(x))
+        else:
+            result.append(current_sep.join(str(c) for c in x))
+    if isinstance(a, str) and isinstance(sep, str):
+        return result[0]
     return _make_result(result)
 
 
@@ -123,6 +142,8 @@ def replace(a, old, new, count=None):
         result = [x.replace(old, new, count) for x in s]
     else:
         result = [x.replace(old, new) for x in s]
+    if isinstance(a, str):
+        return result[0]
     return _make_result(result)
 
 
@@ -130,6 +151,8 @@ def decode(a, encoding='utf-8', errors='strict'):
     """数组元素依次调用 bytes.decode。"""
     s = _get_strings(a)
     result = [x.decode(encoding, errors) if isinstance(x, bytes) else x for x in s]
+    if isinstance(a, (str, bytes)):
+        return result[0]
     return _make_result(result)
 
 
@@ -137,4 +160,6 @@ def encode(a, encoding='utf-8', errors='strict'):
     """数组元素依次调用 str.encode。"""
     s = _get_strings(a)
     result = [x.encode(encoding, errors) if isinstance(x, str) else x for x in s]
+    if isinstance(a, (str, bytes)):
+        return result[0]
     return _make_result(result)

@@ -894,18 +894,24 @@ def _format_complex_scalar(val):
 
 
 def format_float_scalar(val):
-    """Python 版的浮点数格式化（与 Rust 一致）。"""
+    """Python 版的浮点数格式化（四舍五入，保留有效小数）。"""
     if val != val:
         return "nan"
     if val == float("inf"):
         return "inf"
     if val == float("-inf"):
         return "-inf"
-    if val == int(val) and abs(val) < 1e16:
-        v = int(val)
-        if float(v) == val:
+    val_rounded = round(val, 10)
+    if val_rounded == int(val_rounded) and abs(val_rounded) < 1e16:
+        v = int(val_rounded)
+        if float(v) == val_rounded:
             return f"{v}."
-    return str(val)
+    if abs(val_rounded) >= 1e10 or (abs(val_rounded) < 1e-10 and val_rounded != 0):
+        return f"{val_rounded:.10e}"
+    s = f"{val_rounded:.10f}"
+    if '.' in s:
+        s = s.rstrip('0').rstrip('.')
+    return s
 
 
 def _ndarray_methods():
@@ -2061,6 +2067,7 @@ arctan = _math_functions_module.arctan
 arctan2 = _math_functions_module.arctan2
 deg2rad = _math_functions_module.deg2rad
 rad2deg = _math_functions_module.rad2deg
+degrees = rad2deg
 sinh = _math_functions_module.sinh
 cosh = _math_functions_module.cosh
 tanh = _math_functions_module.tanh
@@ -2153,7 +2160,7 @@ __all__ = [
     'where', 'take', 'put', 'select', 'nonzero', 'argwhere', 'flatnonzero',
     'binary_repr',
     'sin', 'cos', 'tan', 'arcsin', 'arccos', 'arctan', 'arctan2',
-    'deg2rad', 'rad2deg',
+    'deg2rad', 'rad2deg', 'degrees',
     'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh',
     'bitwise_and', 'bitwise_or', 'bitwise_xor', 'bitwise_not',
     'invert', 'left_shift', 'right_shift',
