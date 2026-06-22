@@ -222,12 +222,19 @@ def divide(x1, x2):
 
 def power(x1, x2):
     """逐元素幂运算。"""
-    return _wrap(_core.power(_ensure_raw(x1), _ensure_raw(x2)))
+    raw_result = _core.power(_ensure_raw(x1), _ensure_raw(x2))
+    dtype = getattr(x1, '_dtype', 'float64') if hasattr(x1, '_dtype') else 'float64'
+    return _nd()(raw_result, _dtype=dtype)
 
 
 def mod(x1, x2):
     """逐元素取模。"""
-    return _wrap(_core.mod_(_ensure_raw(x1), _ensure_raw(x2)))
+    raw_result = _core.mod_(_ensure_raw(x1), _ensure_raw(x2))
+    dtype = getattr(x1, '_dtype', 'float64') if hasattr(x1, '_dtype') else 'float64'
+    return _nd()(raw_result, _dtype=dtype)
+
+
+remainder = mod  # mod 的别名
 
 
 # ========== 比较运算 ==========
@@ -290,3 +297,9 @@ def allclose(a, b, rtol=1e-05, atol=1e-08):
 asinh = arcsinh
 acosh = arccosh
 atanh = arctanh
+
+
+# 其他数学函数
+def reciprocal(x):
+    """逐元素返回倒数（1/x）。"""
+    return _wrap(_core.reciprocal(_ensure_raw(x)))

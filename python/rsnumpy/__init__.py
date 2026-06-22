@@ -1110,6 +1110,7 @@ uint64 = type('uint64', (), {})
 float16 = type('float16', (), {})
 float32 = type('float32', (), {})
 float64 = type('float64', (), {})
+float_ = float64  # NumPy 别名
 complex64 = type('complex64', (), {})
 complex128 = type('complex128', (), {})
 string_ = type('string_', (), {})
@@ -2090,6 +2091,7 @@ square = _math_functions_module.square
 cbrt = _math_functions_module.cbrt
 abs = _math_functions_module.abs
 sign = _math_functions_module.sign
+reciprocal = _math_functions_module.reciprocal
 clip = _math_functions_module.clip
 sinc = _math_functions_module.sinc
 heaviside = _math_functions_module.heaviside
@@ -2099,6 +2101,7 @@ multiply = _math_functions_module.multiply
 divide = _math_functions_module.divide
 power = _math_functions_module.power
 mod = _math_functions_module.mod
+remainder = _math_functions_module.remainder
 greater = _math_functions_module.greater
 less = _math_functions_module.less
 equal = _math_functions_module.equal
@@ -2167,8 +2170,8 @@ __all__ = [
     'string_', 'unicode_', 'char',
     'exp', 'expm1', 'log', 'log10', 'log2', 'log1p',
     'around', 'floor', 'ceil', 'trunc', 'fix',
-    'sqrt', 'square', 'cbrt', 'abs', 'sign', 'clip', 'sinc', 'heaviside',
-    'add', 'subtract', 'multiply', 'divide', 'power', 'mod',
+    'sqrt', 'square', 'cbrt', 'abs', 'sign', 'reciprocal', 'clip', 'sinc', 'heaviside',
+    'add', 'subtract', 'multiply', 'divide', 'power', 'mod', 'remainder',
     'greater', 'less', 'equal', 'logical_and', 'logical_or', 'isclose', 'allclose',
     'sum', 'mean', 'std', 'var', 'min', 'max', 'ptp',
     'median', 'percentile', 'quantile', 'nanmedian', 'nanpercentile',
