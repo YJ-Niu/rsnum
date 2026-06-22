@@ -2125,6 +2125,7 @@ amin = _statistics_module.amin
 amax = _statistics_module.amax
 ptp = _statistics_module.ptp
 median = _statistics_module.median
+average = _statistics_module.average
 percentile = _statistics_module.percentile
 quantile = _statistics_module.quantile
 nanmedian = _statistics_module.nanmedian
@@ -2176,7 +2177,7 @@ __all__ = [
     'add', 'subtract', 'multiply', 'divide', 'power', 'mod', 'remainder',
     'greater', 'less', 'equal', 'logical_and', 'logical_or', 'isclose', 'allclose',
     'sum', 'mean', 'std', 'var', 'min', 'max', 'amin', 'amax', 'ptp',
-    'median', 'percentile', 'quantile', 'nanmedian', 'nanpercentile',
+    'median', 'average', 'percentile', 'quantile', 'nanmedian', 'nanpercentile',
     'argmax', 'argmin', 'argsort', 'sort', 'searchsorted',
     'cov', 'corrcoef',
     'histogram', 'histogram2d', 'histogramdd', 'digitize',

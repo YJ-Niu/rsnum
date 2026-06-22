@@ -84,6 +84,17 @@ def median(a, axis=None, out=None, keepdims=False):
     return _wrap(_core.median(_ensure_raw(a), axis))
 
 
+def average(a, axis=None, weights=None, returned=False):
+    """计算数组的加权平均值。"""
+    _ = axis
+    if weights is not None:
+        weights = _ensure_raw(weights)
+    result = _core.average(_ensure_raw(a), axis, weights, returned)
+    if returned:
+        return _wrap(result[0]), _wrap(result[1])
+    return _wrap(result)
+
+
 def percentile(a, q, axis=None, out=None, keepdims=False, interpolation='linear'):
     """计算数组的百分位数。"""
     _ = out, interpolation

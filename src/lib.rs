@@ -1949,6 +1949,51 @@ fn median(x: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
 }
 
 #[pyfunction]
+#[pyo3(signature = (a, axis=None, weights=None, returned=false))]
+fn average(a: &NdArray, axis: Option<isize>, weights: Option<&NdArray>, returned: bool) -> PyResult<PyObject> {
+    let py = Python::with_gil(|py| py);
+    
+    if axis.is_some() {
+        return Err(PyValueError::new_err("axis parameter not yet supported"));
+    }
+    
+    let values: Vec<f64> = a.data.iter().copied().collect();
+    
+    let (avg_val, sum_weights): (f64, f64) = match weights {
+        None => {
+            let sum: f64 = values.iter().sum();
+            (sum / values.len() as f64, values.len() as f64)
+        }
+        Some(w) => {
+            let w_values: Vec<f64> = w.data.iter().copied().collect();
+            if values.len() != w_values.len() {
+                return Err(PyValueError::new_err("weights must have the same length as data"));
+            }
+            let weighted_sum: f64 = values.iter().zip(w_values.iter()).map(|(v, w)| v * w).sum();
+            let sum_w: f64 = w_values.iter().sum();
+            if sum_w == 0.0 {
+                return Err(PyValueError::new_err("sum of weights must not be zero"));
+            }
+            (weighted_sum / sum_w, sum_w)
+        }
+    };
+    
+    if returned {
+        let avg_arr = NdArray {
+            data: Array::from_elem(IxDyn(&[]), avg_val),
+        };
+        let sum_w_arr = NdArray {
+            data: Array::from_elem(IxDyn(&[]), sum_weights),
+        };
+        Ok((avg_arr, sum_w_arr).to_py_object(py))
+    } else {
+        Ok(NdArray {
+            data: Array::from_elem(IxDyn(&[]), avg_val),
+        }.into_py(py))
+    }
+}
+
+#[pyfunction]
 #[pyo3(signature = (x, q, axis=None, keepdims=false))]
 fn percentile(x: &NdArray, q: f64, axis: Option<isize>, keepdims: bool) -> PyResult<NdArray> {
     if q < 0.0 || q > 100.0 {
@@ -4352,6 +4397,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sort, m)?)?;
     m.add_function(wrap_pyfunction!(argsort, m)?)?;
     m.add_function(wrap_pyfunction!(median, m)?)?;
+    m.add_function(wrap_pyfunction!(average, m)?)?;
     m.add_function(wrap_pyfunction!(percentile, m)?)?;
     m.add_function(wrap_pyfunction!(meshgrid, m)?)?;
     m.add_function(wrap_pyfunction!(histogram, m)?)?;
