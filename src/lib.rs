@@ -1960,10 +1960,11 @@ fn average(a: &NdArray, axis: Option<isize>, weights: Option<&NdArray>, returned
     let (result_val, sum_weights): (f64, f64) = match weights {
         None => {
             let sum: f64 = values.iter().sum();
+            let avg = sum / values.len() as f64;
             if returned {
-                (values.len() as f64, sum / values.len() as f64)
+                (avg, values.len() as f64)
             } else {
-                (sum / values.len() as f64, 0.0)
+                (avg, 0.0)
             }
         }
         Some(w) => {
@@ -1976,10 +1977,11 @@ fn average(a: &NdArray, axis: Option<isize>, weights: Option<&NdArray>, returned
             if sum_w == 0.0 {
                 return Err(PyValueError::new_err("sum of weights must not be zero"));
             }
+            let avg = weighted_sum / sum_w;
             if returned {
-                (sum_w, weighted_sum / sum_w)
+                (avg, sum_w)
             } else {
-                (weighted_sum / sum_w, 0.0)
+                (avg, 0.0)
             }
         }
     };
