@@ -481,26 +481,7 @@ class ndarray:
         return _ndarray_methods().flatten(self, order)
 
     def copy(self, order='K'):
-        """返回数组的副本，支持 'C'（行序）、'F'（列序）内存布局。"""
-        if order == 'F':
-            shape = list(self.shape)
-            ndim = len(shape)
-            flat = self._array.flatten().tolist()
-            strides = [1] * ndim
-            for i in range(ndim - 2, -1, -1):
-                strides[i] = strides[i + 1] * shape[i + 1]
-            f_order = []
-
-            def _walk(dim, pos):
-                if dim < 0:
-                    f_order.append(pos)
-                else:
-                    for v in range(shape[dim]):
-                        _walk(dim - 1, pos + v * strides[dim])
-            _walk(ndim - 1, 0)
-            reordered = [flat[ci] for ci in f_order]
-            result = _core.ndarray(reordered).reshape(shape)
-            return _wrap_result(result, self._dtype)
+        """返回数组的副本。"""
         return _wrap_result(self._array.copy(), self._dtype)
 
     def transpose(self, *axes):
@@ -1189,8 +1170,8 @@ def array_equal(a, b):
 
 
 def copy(a, order='K'):
-    """返回数组副本。"""
-    return ndarray(a).copy()
+    """返回数组的副本。"""
+    return ndarray(a).copy(order=order)
 
 
 def _resolve_dtype(dtype):
@@ -1384,8 +1365,12 @@ def ix_(*args):
 def where(condition, x=None, y=None):
     """根据条件返回元素或索引。"""
     if x is not None and y is not None:
-        return ndarray(_core.where(_ensure(condition), _ensure(x), _ensure(y)))
-    return ndarray(_core.nonzero(_ensure(condition)))
+        dtype = getattr(x, '_dtype', 'float64')
+        fields = getattr(x, '_fields', None)
+        raw_data = getattr(x, '_raw_data', None)
+        result = _core.where(_ensure(condition), _ensure(x), _ensure(y))
+        return ndarray._wrap(result, _dtype=dtype, _fields=fields, _raw_data=raw_data)
+    return nonzero(condition)
 
 
 def take(a, indices, axis=None, out=None, mode='raise'):
@@ -1411,7 +1396,7 @@ def select(condlist, choicelist, default=0):
 def nonzero(a):
     """返回非零元素的索引，返回元组形式的数组（兼容NumPy）。"""
     raw = _core.nonzero_arrs(_ensure(a))
-    return tuple(ndarray._wrap(arr) for arr in raw)
+    return tuple(ndarray._wrap(arr, _dtype="int64") for arr in raw)
 
 
 def argwhere(a):

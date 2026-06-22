@@ -1779,6 +1779,20 @@ fn transpose(a: &NdArray) -> PyResult<NdArray> {
     a.t()
 }
 
+#[pyfunction]
+fn swapaxes(a: &NdArray, axis1: usize, axis2: usize) -> PyResult<NdArray> {
+    let ndim = a.data.ndim();
+    if axis1 >= ndim || axis2 >= ndim {
+        return Err(PyValueError::new_err(format!(
+            "axis out of bounds: arr.ndim={}, axis1={}, axis2={}",
+            ndim, axis1, axis2
+        )));
+    }
+    let mut arr = a.data.clone();
+    arr.swap_axes(axis1, axis2);
+    Ok(NdArray { data: arr })
+}
+
 // ===== Logic / Selection Functions =====
 
 #[pyfunction]
@@ -4110,6 +4124,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(concatenate, m)?)?;
     m.add_function(wrap_pyfunction!(stack, m)?)?;
     m.add_function(wrap_pyfunction!(transpose, m)?)?;
+    m.add_function(wrap_pyfunction!(swapaxes, m)?)?;
 
     m.add_function(wrap_pyfunction!(where_, m)?)?;
     m.add_function(wrap_pyfunction!(clip, m)?)?;

@@ -22,12 +22,17 @@ def reshape(a, newshape, order='C'):
     """改变数组形状而不改变数据。"""
     if isinstance(newshape, int):
         newshape = (newshape,)
+    arr = a if hasattr(a, '_array') else _wrap(a)
+    if order == 'F':
+        flat = arr.ravel(order='F')
+        return _wrap(_core.reshape(flat._array, newshape))
     return _wrap(_core.reshape(_ensure_raw(a), newshape))
 
 
 def ravel(a, order='C'):
     """展平数组。"""
-    return _wrap(_core.flatten(_ensure_raw(a)))
+    arr = a if hasattr(a, '_array') else _wrap(a)
+    return arr.ravel(order=order)
 
 
 def moveaxis(a, source, destination):
@@ -48,14 +53,24 @@ def broadcast_to(a, shape):
 
 def transpose(a, axes=None):
     """转置数组。"""
-    if axes is None:
-        return _wrap(_core.transpose(_ensure_raw(a)))
-    return _wrap(_core.transpose(_ensure_raw(a)))
+    arr = a if hasattr(a, '_array') else _wrap(a)
+    nd = _nd()
+    dtype = getattr(arr, '_dtype', "float64")
+    fields = getattr(arr, '_fields', None)
+    raw_data = getattr(arr, '_raw_data', None)
+    result = _core.transpose(arr._array)
+    return nd._wrap(result, _dtype=dtype, _fields=fields, _raw_data=raw_data)
 
 
 def swapaxes(a, axis1, axis2):
     """交换数组的两个轴。"""
-    return transpose(a)
+    arr = a if hasattr(a, '_array') else _wrap(a)
+    nd = _nd()
+    dtype = getattr(arr, '_dtype', "float64")
+    fields = getattr(arr, '_fields', None)
+    raw_data = getattr(arr, '_raw_data', None)
+    result = _core.swapaxes(arr._array, axis1, axis2)
+    return nd._wrap(result, _dtype=dtype, _fields=fields, _raw_data=raw_data)
 
 
 def expand_dims(a, axis):

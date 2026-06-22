@@ -71,12 +71,14 @@ class NdArrayMethods:
         将数组展平为一维。
 
         参数:
-            order: 展平顺序，'C'表示C风格（行优先），'F'表示Fortran风格（列优先）。
+            order: 'C'（行优先）、'F'（列优先）、'A'（原顺序）、'K'（内存顺序）
 
         返回:
             ndarray: 展平后的数组。
         """
-        return _wrap_result(arr._array.ravel())
+        if order == 'A' or order == 'K':
+            order = 'C'
+        return NdArrayMethods.flatten(arr, order)
     
     @staticmethod
     def flatten(arr, order='C'):
@@ -142,10 +144,11 @@ class NdArrayMethods:
         返回:
             ndarray: 交换轴后的数组。
         """
-        arr_obj = ndarray(arr._array)
-        axes = list(range(arr_obj.ndim))
-        axes[axis1], axes[axis2] = axes[axis2], axes[axis1]
-        return arr_obj.transpose(*axes)
+        dtype = getattr(arr, '_dtype', "float64")
+        fields = getattr(arr, '_fields', None)
+        raw_data = getattr(arr, '_raw_data', None)
+        result = _core.swapaxes(arr._array, axis1, axis2)
+        return ndarray._wrap(result, _dtype=dtype, _fields=fields, _raw_data=raw_data)
     
     @staticmethod
     def squeeze(arr, axis=None):
