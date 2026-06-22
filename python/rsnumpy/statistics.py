@@ -91,9 +91,9 @@ def average(a, axis=None, weights=None, returned=False):
         weights = _ensure_raw(weights)
     raw_result = _core.average(_ensure_raw(a), axis, weights, returned)
     if returned:
-        avg_val = float(raw_result.data[1])
-        sum_weights = float(raw_result.data[0])
-        return _nd()([avg_val], _dtype='float64'), _nd()([sum_weights], _dtype='float64')
+        avg_val = float(raw_result.data[0])
+        sum_weights = float(raw_result.data[1])
+        return avg_val, sum_weights
     return _wrap(raw_result)
 
 
