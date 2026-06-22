@@ -1950,19 +1950,21 @@ fn median(x: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
 
 #[pyfunction]
 #[pyo3(signature = (a, axis=None, weights=None, returned=false))]
-fn average(a: &NdArray, axis: Option<isize>, weights: Option<&NdArray>, returned: bool) -> PyResult<PyObject> {
-    let py = Python::with_gil(|py| py);
-    
+fn average(a: &NdArray, axis: Option<isize>, weights: Option<&NdArray>, returned: bool) -> PyResult<NdArray> {
     if axis.is_some() {
         return Err(PyValueError::new_err("axis parameter not yet supported"));
     }
     
     let values: Vec<f64> = a.data.iter().copied().collect();
     
-    let (avg_val, sum_weights): (f64, f64) = match weights {
+    let (result_val, sum_weights): (f64, f64) = match weights {
         None => {
             let sum: f64 = values.iter().sum();
-            (sum / values.len() as f64, values.len() as f64)
+            if returned {
+                (values.len() as f64, sum / values.len() as f64)
+            } else {
+                (sum / values.len() as f64, 0.0)
+            }
         }
         Some(w) => {
             let w_values: Vec<f64> = w.data.iter().copied().collect();
@@ -1974,22 +1976,24 @@ fn average(a: &NdArray, axis: Option<isize>, weights: Option<&NdArray>, returned
             if sum_w == 0.0 {
                 return Err(PyValueError::new_err("sum of weights must not be zero"));
             }
-            (weighted_sum / sum_w, sum_w)
+            if returned {
+                (sum_w, weighted_sum / sum_w)
+            } else {
+                (weighted_sum / sum_w, 0.0)
+            }
         }
     };
     
     if returned {
-        let avg_arr = NdArray {
-            data: Array::from_elem(IxDyn(&[]), avg_val),
-        };
-        let sum_w_arr = NdArray {
-            data: Array::from_elem(IxDyn(&[]), sum_weights),
-        };
-        Ok((avg_arr, sum_w_arr).to_py_object(py))
+        let data = vec![result_val, sum_weights];
+        Ok(NdArray {
+            data: Array::from_shape_vec(IxDyn(&[2]), data)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?,
+        })
     } else {
         Ok(NdArray {
-            data: Array::from_elem(IxDyn(&[]), avg_val),
-        }.into_py(py))
+            data: Array::from_elem(IxDyn(&[]), result_val),
+        })
     }
 }
 

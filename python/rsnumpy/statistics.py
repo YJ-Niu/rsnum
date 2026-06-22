@@ -89,10 +89,12 @@ def average(a, axis=None, weights=None, returned=False):
     _ = axis
     if weights is not None:
         weights = _ensure_raw(weights)
-    result = _core.average(_ensure_raw(a), axis, weights, returned)
+    raw_result = _core.average(_ensure_raw(a), axis, weights, returned)
     if returned:
-        return _wrap(result[0]), _wrap(result[1])
-    return _wrap(result)
+        avg_val = float(raw_result.data[1])
+        sum_weights = float(raw_result.data[0])
+        return _nd()([avg_val], _dtype='float64'), _nd()([sum_weights], _dtype='float64')
+    return _wrap(raw_result)
 
 
 def percentile(a, q, axis=None, out=None, keepdims=False, interpolation='linear'):
