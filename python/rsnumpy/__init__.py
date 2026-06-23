@@ -198,11 +198,20 @@ class ndarray:
                 return _core._format_int_str(self._array)
             return _core._format_int_val_str(self._array)
         if getattr(self, '_dtype', "float64") == "bool":
+            def format_bool_list(data):
+                if isinstance(data, list):
+                    inner = " ".join(format_bool_list(v) for v in data)
+                    return "[" + inner + "]"
+                else:
+                    return "True" if data else "False"
             raw = self._array.tolist()
-            val_strs = []
-            for v in raw:
-                val_strs.append("True" if v else "False")
-            return "[" + " ".join(val_strs) + "]"
+            if isinstance(raw, list) and len(raw) > 0 and isinstance(raw[0], list):
+                lines = []
+                for row in raw:
+                    inner = " ".join(format_bool_list(v) for v in row)
+                    lines.append("[" + inner + "]")
+                return "[" + "\n ".join(lines) + "]"
+            return format_bool_list(raw)
         return _core._format_float_str(self._array)
 
     def __len__(self):
@@ -348,33 +357,33 @@ class ndarray:
 
     def __eq__(self, other):
         if _is_ndarray(other):
-            return _wrap_result(self._array.__eq__(other._array), self._dtype)
-        return _wrap_result(self._array.__eq__(other), self._dtype)
+            return _wrap_result(self._array.__eq__(other._array), "bool")
+        return _wrap_result(self._array.__eq__(other), "bool")
 
     def __ne__(self, other):
         if _is_ndarray(other):
-            return _wrap_result(self._array.__ne__(other._array), self._dtype)
-        return _wrap_result(self._array.__ne__(other), self._dtype)
+            return _wrap_result(self._array.__ne__(other._array), "bool")
+        return _wrap_result(self._array.__ne__(other), "bool")
 
     def __lt__(self, other):
         if _is_ndarray(other):
-            return _wrap_result(self._array.__lt__(other._array), self._dtype)
-        return _wrap_result(self._array.__lt__(other), self._dtype)
+            return _wrap_result(self._array.__lt__(other._array), "bool")
+        return _wrap_result(self._array.__lt__(other), "bool")
 
     def __le__(self, other):
         if _is_ndarray(other):
-            return _wrap_result(self._array.__le__(other._array), self._dtype)
-        return _wrap_result(self._array.__le__(other), self._dtype)
+            return _wrap_result(self._array.__le__(other._array), "bool")
+        return _wrap_result(self._array.__le__(other), "bool")
 
     def __gt__(self, other):
         if _is_ndarray(other):
-            return _wrap_result(self._array.__gt__(other._array), self._dtype)
-        return _wrap_result(self._array.__gt__(other), self._dtype)
+            return _wrap_result(self._array.__gt__(other._array), "bool")
+        return _wrap_result(self._array.__gt__(other), "bool")
 
     def __ge__(self, other):
         if _is_ndarray(other):
-            return _wrap_result(self._array.__ge__(other._array), self._dtype)
-        return _wrap_result(self._array.__ge__(other), self._dtype)
+            return _wrap_result(self._array.__ge__(other._array), "bool")
+        return _wrap_result(self._array.__ge__(other), "bool")
 
     def __round__(self, ndigits=None):
         if ndigits is None:
@@ -751,8 +760,12 @@ def _wrap_result(result, dtype="float64"):
     """将原始 ndarray 结果包装到 ndarray 类中。"""
     if hasattr(result, '__class__') and result.__class__.__name__ == 'ndarray':
         return ndarray._wrap(result, _dtype=dtype)
+    if isinstance(result, (list, tuple)):
+        return ndarray(result, _dtype=dtype)
     if isinstance(result, float) and dtype == "int64":
         return int(result)
+    if hasattr(result, 'tolist'):
+        return ndarray._wrap(result, _dtype=dtype)
     return result
 
 
@@ -2143,6 +2156,7 @@ lexsort = _statistics_module.lexsort
 partition = _statistics_module.partition
 argpartition = _statistics_module.argpartition
 searchsorted = _statistics_module.searchsorted
+extract = _statistics_module.extract
 cov = _statistics_module.cov
 corrcoef = _statistics_module.corrcoef
 histogram = _statistics_module.histogram
@@ -2186,7 +2200,7 @@ __all__ = [
     'greater', 'less', 'equal', 'logical_and', 'logical_or', 'isclose', 'allclose',
     'sum', 'mean', 'std', 'var', 'min', 'max', 'amin', 'amax', 'ptp',
     'median', 'average', 'percentile', 'quantile', 'nanmedian', 'nanpercentile',
-    'argmax', 'argmin', 'argsort', 'sort', 'searchsorted',
+    'argmax', 'argmin', 'argsort', 'sort', 'searchsorted', 'extract',
     'cov', 'corrcoef',
     'histogram', 'histogram2d', 'histogramdd', 'digitize',
     'fft', 'ifft', 'rfft', 'irfft',

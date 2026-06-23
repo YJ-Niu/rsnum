@@ -140,13 +140,25 @@ def nanpercentile(a, q, axis=None, out=None, keepdims=False, interpolation='line
 def argmax(a, axis=None, out=None, keepdims=False):
     """返回数组沿指定轴的最大值索引。"""
     _ = out, keepdims
-    return _wrap(_core.argmax_axis(_ensure_raw(a), axis))
+    result = _wrap(_core.argmax_axis(_ensure_raw(a), axis))
+    if hasattr(result, 'tolist'):
+        result_list = result.tolist()
+        int_list = [int(v) for v in result_list]
+        return _nd()(int_list, _dtype='int64')
+    else:
+        return int(result)
 
 
 def argmin(a, axis=None, out=None, keepdims=False):
     """返回数组沿指定轴的最小值索引。"""
     _ = out, keepdims
-    return _wrap(_core.argmin_axis(_ensure_raw(a), axis))
+    result = _wrap(_core.argmin_axis(_ensure_raw(a), axis))
+    if hasattr(result, 'tolist'):
+        result_list = result.tolist()
+        int_list = [int(v) for v in result_list]
+        return _nd()(int_list, _dtype='int64')
+    else:
+        return int(result)
 
 
 def argsort(a, axis=-1, kind=None, order=None):
@@ -298,6 +310,21 @@ def searchsorted(a, v, side='left', sorter=None):
     _ = sorter
     arr = a if hasattr(a, '_array') else _wrap(a)
     return _core.searchsorted(_ensure_raw(arr), v, side)
+
+
+def extract(condition, a):
+    """根据条件从数组中抽取元素。"""
+    cond_arr = condition if hasattr(condition, '_array') else _nd()(condition)
+    data_arr = a if hasattr(a, '_array') else _nd()(a)
+    cond_raw = _ensure_raw(cond_arr)
+    data_raw = _ensure_raw(data_arr)
+    cond_flat = cond_raw.flatten().tolist()
+    data_flat = data_raw.flatten().tolist()
+    result = []
+    for c, d in zip(cond_flat, data_flat):
+        if c != 0:
+            result.append(d)
+    return _nd()(result)
 
 
 def cov(m, y=None, rowvar=True, bias=False, ddof=None, fweights=None, aweights=None, *, dtype=None):
