@@ -17,10 +17,7 @@ def zeros(shape, dtype=None, order='C'):
     from .__init__ import ndarray
     if isinstance(shape, int):
         shape = (shape, shape)
-    size = shape[0] * shape[1]
-    raw_data = [0.0] * size
-    arr = ndarray(raw_data, _dtype=dtype or 'float64')
-    return arr.reshape(shape)
+    return ndarray(_core.zeros(shape), _dtype=dtype or 'float64')
 
 
 def ones(shape, dtype=None, order='C'):
@@ -28,22 +25,15 @@ def ones(shape, dtype=None, order='C'):
     from .__init__ import ndarray
     if isinstance(shape, int):
         shape = (shape, shape)
-    size = shape[0] * shape[1]
-    raw_data = [1.0] * size
-    arr = ndarray(raw_data, _dtype=dtype or 'float64')
-    return arr.reshape(shape)
+    return ndarray(_core.ones(shape), _dtype=dtype or 'float64')
 
 
 def eye(n, M=None, k=0, dtype=None, order='C'):
     """返回一个矩阵，对角线元素为 1，其他位置为零。"""
+    from .__init__ import ndarray
     if M is None:
         M = n
-    arr = zeros((n, M), dtype=dtype)
-    for i in range(n):
-        j = i + k
-        if 0 <= j < M:
-            arr[i, j] = 1.0
-    return arr
+    return ndarray(_core.eye(n, M, k), _dtype=dtype or 'float64')
 
 
 def identity(n, dtype=None):
