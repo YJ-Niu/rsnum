@@ -1873,6 +1873,244 @@ fn unique(a: &NdArray) -> PyResult<NdArray> {
 }
 
 #[pyfunction]
+#[pyo3(signature = (a, return_index=false, return_inverse=false, return_counts=false))]
+fn unique_full(a: &NdArray, return_index: bool, return_inverse: bool, return_counts: bool) -> PyResult<Vec<NdArray>> {
+    let flat_data: Vec<f64> = a.data.iter().copied().collect();
+    let n = flat_data.len();
+    
+    let mut indexed: Vec<(f64, usize)> = flat_data.iter().enumerate().map(|(i, &v)| (v, i)).collect();
+    indexed.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    
+    let mut unique_vals = Vec::new();
+    let mut first_indices = Vec::new();
+    let mut counts = Vec::new();
+    
+    let mut prev_val = None;
+    let mut count = 0;
+    let mut first_idx = 0;
+    
+    for (_i, (val, orig_idx)) in indexed.iter().enumerate() {
+        match prev_val {
+            None => {
+                prev_val = Some(*val);
+                first_idx = *orig_idx;
+                count = 1;
+            }
+            Some(pv) => {
+                if (val - pv).abs() < 1e-15 {
+                    count += 1;
+                } else {
+                    unique_vals.push(pv);
+                    first_indices.push(first_idx as f64);
+                    counts.push(count as f64);
+                    prev_val = Some(*val);
+                    first_idx = *orig_idx;
+                    count = 1;
+                }
+            }
+        }
+    }
+    
+    if let Some(pv) = prev_val {
+        unique_vals.push(pv);
+        first_indices.push(first_idx as f64);
+        counts.push(count as f64);
+    }
+    
+    let mut inverse = Vec::new();
+    if return_inverse {
+        inverse = Vec::with_capacity(n);
+        for v in &flat_data {
+            let mut found = false;
+            for (i, uv) in unique_vals.iter().enumerate() {
+                if (v - uv).abs() < 1e-15 {
+                    inverse.push(i as f64);
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                inverse.push(0.0);
+            }
+        }
+    }
+    
+    let unique_arr = Array::from_shape_vec(IxDyn(&[unique_vals.len()]), unique_vals)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let mut results = vec![NdArray { data: unique_arr }];
+    
+    if return_index {
+        let idx_arr = Array::from_shape_vec(IxDyn(&[first_indices.len()]), first_indices)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        results.push(NdArray { data: idx_arr });
+    }
+    
+    if return_inverse {
+        let inv_arr = Array::from_shape_vec(IxDyn(&[inverse.len()]), inverse)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        results.push(NdArray { data: inv_arr });
+    }
+    
+    if return_counts {
+        let cnt_arr = Array::from_shape_vec(IxDyn(&[counts.len()]), counts)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        results.push(NdArray { data: cnt_arr });
+    }
+    
+    Ok(results)
+}
+
+#[pyfunction]
+#[pyo3(signature = (a, new_shape))]
+fn resize_rs(a: &NdArray, new_shape: Vec<usize>) -> PyResult<NdArray> {
+    let new_size: usize = new_shape.iter().product();
+    let flat_data: Vec<f64> = a.data.iter().copied().collect();
+    
+    if flat_data.is_empty() {
+        let arr = Array::from_shape_vec(IxDyn(&new_shape), Vec::new())
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        return Ok(NdArray { data: arr });
+    }
+    
+    let mut result = Vec::with_capacity(new_size);
+    for i in 0..new_size {
+        result.push(flat_data[i % flat_data.len()]);
+    }
+    
+    let arr = Array::from_shape_vec(IxDyn(&new_shape), result)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(NdArray { data: arr })
+}
+
+#[pyfunction]
+#[pyo3(signature = (a, indices, axis=None))]
+fn delete_rs(a: &NdArray, indices: Vec<isize>, axis: Option<isize>) -> PyResult<NdArray> {
+    let ndim = a.data.ndim();
+    let ax = axis.map(|x| if x < 0 { (ndim as isize + x) as usize } else { x as usize });
+    
+    let idx_set: std::collections::BTreeSet<usize> = indices
+        .iter()
+        .map(|&i| {
+            let len = if let Some(axis_idx) = ax { a.data.shape()[axis_idx] } else { a.data.len() };
+            let idx = if i < 0 { (len as isize + i) as usize } else { i as usize };
+            idx.min(len - 1).max(0)
+        })
+        .collect();
+    
+    if ax.is_none() {
+        let flat_data: Vec<f64> = a.data.iter().copied().collect();
+        let result: Vec<f64> = flat_data.into_iter()
+            .enumerate()
+            .filter(|(i, _)| !idx_set.contains(i))
+            .map(|(_, v)| v)
+            .collect();
+        let arr = Array::from_shape_vec(IxDyn(&[result.len()]), result)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        return Ok(NdArray { data: arr });
+    }
+    
+    let ax = ax.unwrap();
+    let shape = a.data.shape().to_vec();
+    let axis_size = shape[ax];
+    let pre_size: usize = shape.iter().take(ax).product();
+    let post_size: usize = shape.iter().skip(ax + 1).product();
+    
+    let flat_data: Vec<f64> = a.data.iter().copied().collect();
+    let mut result = Vec::new();
+    let block_size = axis_size * post_size;
+    
+    for outer in 0..pre_size {
+        let base = outer * block_size;
+        for i in 0..axis_size {
+            if !idx_set.contains(&i) {
+                result.extend_from_slice(&flat_data[base + i * post_size..base + (i + 1) * post_size]);
+            }
+        }
+    }
+    
+    let mut new_shape = shape;
+    new_shape[ax] = axis_size - idx_set.len();
+    let arr = Array::from_shape_vec(IxDyn(&new_shape), result)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(NdArray { data: arr })
+}
+
+#[pyfunction]
+#[pyo3(signature = (a, indices, values, axis=None))]
+fn insert_rs(a: &NdArray, indices: Vec<isize>, values: Vec<f64>, axis: Option<isize>) -> PyResult<NdArray> {
+    let ndim = a.data.ndim();
+    let ax = axis.map(|x| if x < 0 { (ndim as isize + x) as usize } else { x as usize });
+    
+    let flat_data: Vec<f64> = a.data.iter().copied().collect();
+    
+    if ax.is_none() {
+        let mut result = flat_data.clone();
+        let mut offset = 0;
+        let mut sorted_indices: Vec<isize> = indices.clone();
+        sorted_indices.sort_unstable();
+        
+        for &idx in &sorted_indices {
+            let pos = if idx < 0 { (result.len() as isize + idx + offset) as usize } else { (idx + offset) as usize };
+            let pos = pos.min(result.len()).max(0);
+            
+            for &v in values.iter().rev() {
+                result.insert(pos, v);
+            }
+            offset += values.len() as isize;
+        }
+        
+        let arr = Array::from_shape_vec(IxDyn(&[result.len()]), result)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        return Ok(NdArray { data: arr });
+    }
+    
+    let ax = ax.unwrap();
+    let shape = a.data.shape().to_vec();
+    let axis_size = shape[ax];
+    let pre_size: usize = shape.iter().take(ax).product();
+    let post_size: usize = shape.iter().skip(ax + 1).product();
+    
+    let needed = pre_size * post_size;
+    let mut vals = Vec::with_capacity(needed);
+    for i in 0..needed {
+        vals.push(values[i % values.len()]);
+    }
+    
+    let idx_set: std::collections::BTreeSet<usize> = indices
+        .iter()
+        .map(|&i| {
+            let idx = if i < 0 { (axis_size as isize + i) as usize } else { i as usize };
+            idx.min(axis_size).max(0)
+        })
+        .collect();
+    
+    let new_axis_size = axis_size + idx_set.len();
+    let mut result = Vec::with_capacity(pre_size * new_axis_size * post_size);
+    let block_size = axis_size * post_size;
+    
+    for outer in 0..pre_size {
+        let base = outer * block_size;
+        let mut src_idx = 0;
+        
+        for dest_idx in 0..new_axis_size {
+            if idx_set.contains(&dest_idx) {
+                let val_base = outer * post_size;
+                result.extend_from_slice(&vals[val_base..val_base + post_size]);
+            } else {
+                result.extend_from_slice(&flat_data[base + src_idx * post_size..base + (src_idx + 1) * post_size]);
+                src_idx += 1;
+            }
+        }
+    }
+    
+    let mut new_shape = shape;
+    new_shape[ax] = new_axis_size;
+    let arr = Array::from_shape_vec(IxDyn(&new_shape), result)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(NdArray { data: arr })
+}
+
+#[pyfunction]
 #[pyo3(signature = (a, axis=-1))]
 fn sort(a: &NdArray, axis: isize) -> PyResult<NdArray> {
     a.sort(axis)
@@ -1950,6 +2188,169 @@ fn partition(a: &NdArray, kth: Vec<i64>, axis: isize) -> PyResult<NdArray> {
         }
     }
     Ok(NdArray { data: result })
+}
+
+#[pyfunction]
+#[pyo3(signature = (a, kth, axis=-1))]
+fn argpartition(a: &NdArray, kth: Vec<i64>, axis: isize) -> PyResult<NdArray> {
+    let ndim = a.data.ndim();
+    let ax = if axis < 0 { (ndim as isize + axis) as usize } else { axis as usize };
+
+    if ndim == 0 {
+        return Ok(NdArray {
+            data: a.data.clone(),
+        });
+    }
+
+    let shape = a.data.shape().to_vec();
+    let ax_len = shape[ax];
+
+    let mut kths: Vec<usize> = kth.iter().map(|&k| {
+        let mut kk = k;
+        if kk < 0 {
+            kk += ax_len as i64;
+        }
+        if kk < 0 || kk >= ax_len as i64 {
+            Err(PyValueError::new_err("kth out of bounds"))
+        } else {
+            Ok(kk as usize)
+        }
+    }).collect::<Result<Vec<_>, _>>()?;
+    kths.sort();
+    kths.dedup();
+
+    let flat_data: Vec<f64> = a.data.iter().copied().collect();
+    let mut indices: Vec<f64> = (0..flat_data.len()).map(|i| i as f64).collect();
+    
+    let outer_size: usize = shape[..ax].iter().product();
+    let inner_size: usize = shape[ax + 1..].iter().product();
+    let outer_strides: usize = inner_size * ax_len;
+    let inner_strides = inner_size;
+
+    for outer in 0..outer_size {
+        for inner in 0..inner_size {
+            let start = outer * outer_strides + inner;
+            let mut values: Vec<(f64, usize)> = (0..ax_len)
+                .map(|i| (flat_data[start + i * inner_strides], start + i * inner_strides))
+                .collect();
+            
+            for &k in &kths {
+                let mut low = 0;
+                let mut high = ax_len - 1;
+                while low < high {
+                    let pivot_idx = (low + high) / 2;
+                    values.swap(pivot_idx, high);
+                    let pivot = values[high].0;
+                    let mut i = low;
+                    for j in low..high {
+                        if values[j].0 < pivot {
+                            values.swap(i, j);
+                            i += 1;
+                        }
+                    }
+                    values.swap(i, high);
+                    if i == k {
+                        break;
+                    } else if i < k {
+                        low = i + 1;
+                    } else {
+                        high = i - 1;
+                    }
+                }
+            }
+            
+            for (i, &(_, orig_idx)) in values.iter().enumerate() {
+                indices[start + i * inner_strides] = orig_idx as f64;
+            }
+        }
+    }
+    
+    let arr = Array::from_shape_vec(IxDyn(&shape), indices)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(NdArray { data: arr })
+}
+
+#[pyfunction]
+fn lexsort(keys: Vec<NdArray>) -> PyResult<NdArray> {
+    if keys.is_empty() {
+        return Ok(NdArray {
+            data: Array::from_shape_vec(IxDyn(&[0]), Vec::new()).unwrap(),
+        });
+    }
+    
+    let n = keys[0].data.len();
+    let mut indices: Vec<usize> = (0..n).collect();
+    
+    indices.sort_by(|&a, &b| {
+        for key in keys.iter().rev() {
+            let va = key.data[a];
+            let vb = key.data[b];
+            match va.partial_cmp(&vb) {
+                Some(std::cmp::Ordering::Equal) => continue,
+                Some(ord) => return ord,
+                None => return std::cmp::Ordering::Equal,
+            }
+        }
+        std::cmp::Ordering::Equal
+    });
+    
+    let result: Vec<f64> = indices.into_iter().map(|i| i as f64).collect();
+    let arr = Array::from_shape_vec(IxDyn(&[result.len()]), result)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(NdArray { data: arr })
+}
+
+#[pyfunction]
+fn sort_complex(a: &NdArray) -> PyResult<NdArray> {
+    let flat_data: Vec<f64> = a.data.iter().copied().collect();
+    let n = flat_data.len();
+    
+    if n == 0 {
+        return Ok(NdArray {
+            data: Array::from_shape_vec(IxDyn(&[0]), Vec::new()).unwrap(),
+        });
+    }
+    
+    let mut indexed: Vec<(f64, f64, usize)> = flat_data.iter().enumerate().map(|(i, &v)| {
+        (v, 0.0, i)
+    }).collect();
+    
+    indexed.sort_by(|a, b| {
+        match a.0.partial_cmp(&b.0) {
+            Some(std::cmp::Ordering::Equal) => a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal),
+            Some(ord) => ord,
+            None => std::cmp::Ordering::Equal,
+        }
+    });
+    
+    let mut result = Vec::with_capacity(n);
+    for (val, _, _) in indexed {
+        result.push(val);
+    }
+    
+    let shape = a.data.shape().to_vec();
+    let arr = Array::from_shape_vec(IxDyn(&shape), result)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(NdArray { data: arr })
+}
+
+#[pyfunction]
+fn extract(condition: &NdArray, a: &NdArray) -> PyResult<NdArray> {
+    let cond_flat: Vec<f64> = condition.data.iter().copied().collect();
+    let data_flat: Vec<f64> = a.data.iter().copied().collect();
+    
+    let min_len = cond_flat.len().min(data_flat.len());
+    let mut result = Vec::new();
+    
+    for i in 0..min_len {
+        if cond_flat[i] != 0.0 {
+            result.push(data_flat[i]);
+        }
+    }
+    
+    let arr = Array::from_shape_vec(IxDyn(&[result.len()]), result)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(NdArray { data: arr })
 }
 
 #[allow(unused)]
@@ -2933,6 +3334,41 @@ fn squeeze(a: &NdArray) -> PyResult<NdArray> {
 #[pyfunction]
 fn flatten(a: &NdArray) -> NdArray {
     a.flatten()
+}
+
+#[pyfunction]
+#[pyo3(signature = (a, order="C"))]
+fn flatten_full(a: &NdArray, order: &str) -> PyResult<NdArray> {
+    if order == "F" && a.data.ndim() > 1 {
+        let shape = a.data.shape().to_vec();
+        let ndim = shape.len();
+        let flat_c: Vec<f64> = a.data.iter().copied().collect();
+        
+        let mut strides = vec![1; ndim];
+        for i in (0..ndim - 1).rev() {
+            strides[i] = strides[i + 1] * shape[i + 1];
+        }
+        
+        let mut flat_f = Vec::with_capacity(flat_c.len());
+        
+        fn walk_f(order: usize, pos: usize, shape: &[usize], strides: &[usize], flat_c: &[f64], flat_f: &mut Vec<f64>) {
+            if order == 0 {
+                flat_f.push(flat_c[pos]);
+            } else {
+                for v in 0..shape[order - 1] {
+                    walk_f(order - 1, pos + v * strides[order - 1], shape, strides, flat_c, flat_f);
+                }
+            }
+        }
+        
+        walk_f(ndim, 0, &shape, &strides, &flat_c, &mut flat_f);
+        
+        let arr = Array::from_shape_vec(IxDyn(&[flat_f.len()]), flat_f)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(NdArray { data: arr })
+    } else {
+        Ok(a.flatten())
+    }
 }
 
 #[pyfunction]
@@ -4652,9 +5088,17 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(where_, m)?)?;
     m.add_function(wrap_pyfunction!(clip, m)?)?;
     m.add_function(wrap_pyfunction!(unique, m)?)?;
+    m.add_function(wrap_pyfunction!(unique_full, m)?)?;
+    m.add_function(wrap_pyfunction!(resize_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(delete_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(insert_rs, m)?)?;
     m.add_function(wrap_pyfunction!(sort, m)?)?;
     m.add_function(wrap_pyfunction!(argsort, m)?)?;
     m.add_function(wrap_pyfunction!(partition, m)?)?;
+    m.add_function(wrap_pyfunction!(argpartition, m)?)?;
+    m.add_function(wrap_pyfunction!(lexsort, m)?)?;
+    m.add_function(wrap_pyfunction!(sort_complex, m)?)?;
+    m.add_function(wrap_pyfunction!(extract, m)?)?;
     m.add_function(wrap_pyfunction!(median, m)?)?;
     m.add_function(wrap_pyfunction!(average, m)?)?;
     m.add_function(wrap_pyfunction!(percentile, m)?)?;
@@ -4694,6 +5138,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(tile, m)?)?;
     m.add_function(wrap_pyfunction!(squeeze, m)?)?;
     m.add_function(wrap_pyfunction!(flatten, m)?)?;
+    m.add_function(wrap_pyfunction!(flatten_full, m)?)?;
     m.add_function(wrap_pyfunction!(reshape, m)?)?;
 
     m.add_function(wrap_pyfunction!(logspace, m)?)?;

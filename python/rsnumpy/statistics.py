@@ -192,17 +192,16 @@ def lexsort(keys, axis=-1):
     _ = axis
     if not isinstance(keys, (tuple, list)):
         keys = (keys,)
-    key_arrays = []
-    for key in keys:
-        if _is_ndarray(key):
-            key_arrays.append(key.tolist())
-        elif hasattr(key, 'tolist'):
-            key_arrays.append(key.tolist())
-        else:
-            key_arrays.append(list(key))
-    n = len(key_arrays[0]) if key_arrays else 0
+    
+    first_key = keys[0]
+    n = len(first_key) if hasattr(first_key, '__len__') else 0
+    if n == 0:
+        return _nd()([], _dtype='int64')
+    
     indices = list(range(n))
-    indices.sort(key=lambda i: tuple(key_arrays[idx][i] for idx in reversed(range(len(key_arrays)))))
+    
+    indices.sort(key=lambda i: tuple(key[i] for key in reversed(keys)))
+    
     return _nd()(indices, _dtype='int64')
 
 
@@ -316,15 +315,7 @@ def extract(condition, a):
     """根据条件从数组中抽取元素。"""
     cond_arr = condition if hasattr(condition, '_array') else _nd()(condition)
     data_arr = a if hasattr(a, '_array') else _nd()(a)
-    cond_raw = _ensure_raw(cond_arr)
-    data_raw = _ensure_raw(data_arr)
-    cond_flat = cond_raw.flatten().tolist()
-    data_flat = data_raw.flatten().tolist()
-    result = []
-    for c, d in zip(cond_flat, data_flat):
-        if c != 0:
-            result.append(d)
-    return _nd()(result)
+    return _wrap(_core.extract(cond_arr._array, data_arr._array))
 
 
 def cov(m, y=None, rowvar=True, bias=False, ddof=None, fweights=None, aweights=None, *, dtype=None):
