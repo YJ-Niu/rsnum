@@ -16,12 +16,14 @@
 **rsnumpy** 是一个由 **Rust** 驱动的高性能多维数组库，提供与 **NumPy** 兼容的 API。绝大部分计算逻辑（数组操作、数学函数、统计函数、线性代数、FFT、随机数、I/O、多项式等）均在 **Rust 层**实现，**Python 层仅作为薄包装（thin wrapper）**，负责参数传递与结果包装。
 
 **优势：**
+
 - 性能：核心计算使用 Rust 实现，接近或超过 NumPy 的速度
 - 类型安全：利用 Rust 的强类型系统避免运行时错误
 - 内存安全：无数据竞争，无内存泄漏
 - 完整 API：覆盖 NumPy 常用功能（数组操作、数学、统计、linalg、FFT、random、I/O、polynomial）
 
 **项目结构：**
+
 ```
 rsnumpy/
 ├── src/                       # Rust 源码
@@ -49,12 +51,12 @@ rsnumpy/
 
 ### 2. 环境要求
 
-| 工具       | 最低版本       | 说明                    |
-|------------|---------------|-------------------------|
-| Python     | ≥ 3.8         | 推荐 3.10+              |
-| Rust       | ≥ 1.75        | `edition = "2024"`      |
-| maturin    | ≥ 1.13, < 2.0 | Rust ↔ Python 绑定      |
-| uv（可选） | 最新          | 快速创建 venv 与安装     |
+| 工具       | 最低版本      | 说明                 |
+| ---------- | ------------- | -------------------- |
+| Python     | ≥ 3.10        | 推荐 3.10+           |
+| Rust       | ≥ 1.75        | `edition = "2024"`   |
+| maturin    | ≥ 1.13, < 2.0 | Rust ↔ Python 绑定   |
+| uv（可选） | 最新          | 快速创建 venv 与安装 |
 
 ---
 
@@ -74,8 +76,8 @@ cd rsnumpy
 uv venv .venv --python 3.11
 source .venv/bin/activate
 
-# 安装 maturin 和 numpy
-uv pip install maturin numpy
+# 安装 maturin 和 rsnumpy
+uv pip install maturin
 ```
 
 如果使用标准 `venv`：
@@ -83,7 +85,7 @@ uv pip install maturin numpy
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install maturin numpy
+pip install maturin
 ```
 
 #### 3.3 构建并安装
@@ -95,6 +97,7 @@ bash build_wheel.sh
 ```
 
 脚本会自动：
+
 1. 检测 `.venv` 中的 Python
 2. 调用 `maturin build --release`
 3. 生成 `.whl` 到 `wheelhouse/`
@@ -303,8 +306,13 @@ np.save('data.npy', a)
 b = np.load('data.npy')
 
 # 保存 / 加载文本
-np.savetxt('data.txt', a)
-data = np.loadtxt('data.txt')
+# fmt 参数控制输出格式，delimiter 参数指定分隔符
+np.savetxt('data.txt', a, fmt='%d', delimiter=',')  # 保存为整数，逗号分隔
+data = np.loadtxt('data.txt', delimiter=',', dtype=int)  # 加载为整数类型
+print(data)  # [[0 0 1 1 2]
+             #  [2 3 3 4 4]
+             #  [5 5 6 6 7]
+             #  [7 8 8 9 9]]
 
 # 保存 / 加载 .npz（多个数组）
 a = np.array([1, 2, 3])
@@ -339,18 +347,23 @@ print(np.isfinite(a))
 ### 6. 常见问题
 
 #### Q1: `ModuleNotFoundError: No module named 'rsnumpy'`
+
 A: 需要先构建并安装：`bash build_wheel.sh`
 
 #### Q2: 编译报错 `error: linker not found`
+
 A: 安装 Xcode Command Line Tools（macOS）：`xcode-select --install`
 
 #### Q3: 编译报错 `pyo3` 版本冲突
+
 A: 确保 Python ≥ 3.8，且 `pip install --upgrade maturin pyo3`
 
 #### Q4: 性能是否优于 NumPy？
+
 A: 取决于具体操作。Rust 实现的纯计算（sum/mean/dot/matmul 等）通常有竞争力；但 NumPy 底层使用 BLAS/LAPACK 等高度优化的库，部分场景（大型矩阵乘法）NumPy 仍然更快。
 
 #### Q5: 是否支持 GPU？
+
 A: 当前版本仅支持 CPU。
 
 ---
@@ -366,14 +379,14 @@ A: 当前版本仅支持 CPU。
 
 以下是在 macOS (Apple Silicon M2) 上的初步性能测试结果（数组大小：1000x1000）：
 
-| 操作 | rsnumpy | NumPy | 相对性能 |
-|------|---------|-------|----------|
-| `np.sum()` | 0.5 ms | 0.8 ms | **1.6x faster** |
-| `np.mean()` | 0.6 ms | 0.9 ms | **1.5x faster** |
-| `np.dot()` (向量点积) | 0.1 ms | 0.2 ms | **2.0x faster** |
-| `np.matmul()` (矩阵乘法) | 2.1 ms | 1.8 ms | ~0.9x |
-| `np.sin()` | 1.2 ms | 1.5 ms | **1.25x faster** |
-| `np.sort()` | 3.5 ms | 4.2 ms | **1.2x faster** |
+| 操作                     | rsnumpy | NumPy  | 相对性能         |
+| ------------------------ | ------- | ------ | ---------------- |
+| `np.sum()`               | 0.5 ms  | 0.8 ms | **1.6x faster**  |
+| `np.mean()`              | 0.6 ms  | 0.9 ms | **1.5x faster**  |
+| `np.dot()` (向量点积)    | 0.1 ms  | 0.2 ms | **2.0x faster**  |
+| `np.matmul()` (矩阵乘法) | 2.1 ms  | 1.8 ms | ~0.9x            |
+| `np.sin()`               | 1.2 ms  | 1.5 ms | **1.25x faster** |
+| `np.sort()`              | 3.5 ms  | 4.2 ms | **1.2x faster**  |
 
 > **说明**：矩阵乘法等操作使用了 BLAS 优化的 NumPy 可能在大型矩阵上表现更好。rsnumpy 在纯计算密集型操作上有优势。
 
@@ -386,6 +399,7 @@ A: 当前版本仅支持 CPU。
 - **发布**: 打 tag 时自动构建并发布到 PyPI
 
 相关配置文件：
+
 - `.github/workflows/ci.yml` - 主 CI 流程
 - `.github/workflows/rust-clippy.yml` - Rust 代码质量检查
 - `.github/workflows/release.yml` - 发布流程
@@ -411,12 +425,14 @@ A: 当前版本仅支持 CPU。
 **rsnumpy** is a high-performance multi-dimensional array library powered by **Rust**, providing a **NumPy-compatible** API. The vast majority of computation (array operations, math, statistics, linear algebra, FFT, random, I/O, polynomials, etc.) is implemented in **Rust**, while the **Python layer is just a thin wrapper** that handles argument passing and result wrapping.
 
 **Advantages:**
+
 - **Performance**: Core computations in Rust, comparable to or faster than NumPy
 - **Type safety**: Strong typing from Rust eliminates runtime errors
 - **Memory safety**: No data races, no memory leaks
 - **Comprehensive API**: Covers all common NumPy functionality
 
 **Project layout:**
+
 ```
 rsnumpy/
 ├── src/                       # Rust source
@@ -444,12 +460,12 @@ rsnumpy/
 
 ### 2. Requirements
 
-| Tool         | Minimum Version | Notes                       |
-|--------------|-----------------|-----------------------------|
-| Python       | ≥ 3.8           | 3.10+ recommended           |
-| Rust         | ≥ 1.75          | `edition = "2024"`          |
-| maturin      | ≥ 1.13, < 2.0   | Rust ↔ Python binding       |
-| uv (optional)| latest          | Fast venv & package manager |
+| Tool          | Minimum Version | Notes                       |
+| ------------- | --------------- | --------------------------- |
+| Python        | ≥ 3.8           | 3.10+ recommended           |
+| Rust          | ≥ 1.75          | `edition = "2024"`          |
+| maturin       | ≥ 1.13, < 2.0   | Rust ↔ Python binding       |
+| uv (optional) | latest          | Fast venv & package manager |
 
 ---
 
@@ -490,6 +506,7 @@ bash build_wheel.sh
 ```
 
 The script will:
+
 1. Detect Python from `.venv`
 2. Run `maturin build --release`
 3. Generate `.whl` in `wheelhouse/`
@@ -698,8 +715,13 @@ np.save('data.npy', a)
 b = np.load('data.npy')
 
 # Save / load text
-np.savetxt('data.txt', a)
-data = np.loadtxt('data.txt')
+# fmt parameter controls output format, delimiter specifies separator
+np.savetxt('data.txt', a, fmt='%d', delimiter=',')  # Save as integers, comma-separated
+data = np.loadtxt('data.txt', delimiter=',', dtype=int)  # Load as integer type
+print(data)  # [[0 0 1 1 2]
+             #  [2 3 3 4 4]
+             #  [5 5 6 6 7]
+             #  [7 8 8 9 9]]
 
 # Save / load .npz (multiple arrays)
 a = np.array([1, 2, 3])
@@ -734,18 +756,23 @@ print(np.isfinite(a))
 ### 6. FAQ
 
 #### Q1: `ModuleNotFoundError: No module named 'rsnumpy'`
+
 A: Build and install first: `bash build_wheel.sh`
 
 #### Q2: Compilation error `error: linker not found`
+
 A: Install Xcode Command Line Tools (macOS): `xcode-select --install`
 
 #### Q3: Compilation error `pyo3` version conflict
+
 A: Ensure Python ≥ 3.8 and `pip install --upgrade maturin pyo3`
 
 #### Q4: Is rsnumpy faster than NumPy?
+
 A: It depends. Pure Rust computations (sum/mean/dot/matmul) are competitive; however, NumPy uses highly optimized BLAS/LAPACK under the hood, so for very large matrix multiplications NumPy may still be faster.
 
 #### Q5: GPU support?
+
 A: Not in the current version (CPU only).
 
 ---
@@ -761,14 +788,14 @@ A: Not in the current version (CPU only).
 
 Preliminary benchmark results on macOS (Apple Silicon M2) with 1000x1000 arrays:
 
-| Operation | rsnumpy | NumPy | Relative Performance |
-|-----------|---------|-------|---------------------|
-| `np.sum()` | 0.5 ms | 0.8 ms | **1.6x faster** |
-| `np.mean()` | 0.6 ms | 0.9 ms | **1.5x faster** |
-| `np.dot()` (vector dot) | 0.1 ms | 0.2 ms | **2.0x faster** |
-| `np.matmul()` (matrix multiply) | 2.1 ms | 1.8 ms | ~0.9x |
-| `np.sin()` | 1.2 ms | 1.5 ms | **1.25x faster** |
-| `np.sort()` | 3.5 ms | 4.2 ms | **1.2x faster** |
+| Operation                       | rsnumpy | NumPy  | Relative Performance |
+| ------------------------------- | ------- | ------ | -------------------- |
+| `np.sum()`                      | 0.5 ms  | 0.8 ms | **1.6x faster**      |
+| `np.mean()`                     | 0.6 ms  | 0.9 ms | **1.5x faster**      |
+| `np.dot()` (vector dot)         | 0.1 ms  | 0.2 ms | **2.0x faster**      |
+| `np.matmul()` (matrix multiply) | 2.1 ms  | 1.8 ms | ~0.9x                |
+| `np.sin()`                      | 1.2 ms  | 1.5 ms | **1.25x faster**     |
+| `np.sort()`                     | 3.5 ms  | 4.2 ms | **1.2x faster**      |
 
 > **Note**: NumPy with BLAS optimization may outperform rsnumpy for very large matrix operations. rsnumpy excels at pure compute-bound operations.
 
@@ -781,6 +808,7 @@ The project uses GitHub Actions for continuous integration:
 - **Release**: Auto-build and publish to PyPI when tagging
 
 Related configuration files:
+
 - `.github/workflows/ci.yml` - Main CI workflow
 - `.github/workflows/rust-clippy.yml` - Rust code quality
 - `.github/workflows/release.yml` - Release workflow
