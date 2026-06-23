@@ -27,7 +27,9 @@ from .polynomial import Poly, polyval, polyfit, polyder, polyint, polyroots
 from .linalg import linalg_module as _linalg_module
 from .random import random_module as _random_module
 from . import char as _char_module
+from . import matlib as _matlib_module
 
+__version__ = "1.0.1"
 
 class ArrayFlags:
     """数组内存布局信息，与 NumPy 的 np.ndarray.flags 兼容。"""
@@ -193,16 +195,25 @@ class ndarray:
         if cpx is not None:
             inner = _format_complex_repr_1d(cpx)
             return inner
-        if getattr(self, '_dtype', "float64") in ("int64", "uint8", "uint16", "uint32", "uint64"):
+        if getattr(self, '_dtype', "float64") in ("int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"):
             if getattr(self, '_is_empty', False):
                 return _core._format_int_str(self._array)
             return _core._format_int_val_str(self._array)
         if getattr(self, '_dtype', "float64") == "bool":
+            def format_bool_list(data):
+                if isinstance(data, list):
+                    inner = " ".join(format_bool_list(v) for v in data)
+                    return "[" + inner + "]"
+                else:
+                    return "True" if data else "False"
             raw = self._array.tolist()
-            val_strs = []
-            for v in raw:
-                val_strs.append("True" if v else "False")
-            return "[" + " ".join(val_strs) + "]"
+            if isinstance(raw, list) and len(raw) > 0 and isinstance(raw[0], list):
+                lines = []
+                for row in raw:
+                    inner = " ".join(format_bool_list(v) for v in row)
+                    lines.append("[" + inner + "]")
+                return "[" + "\n ".join(lines) + "]"
+            return format_bool_list(raw)
         return _core._format_float_str(self._array)
 
     def __len__(self):
@@ -234,6 +245,9 @@ class ndarray:
             if raw is not None:
                 return list(raw)
         return raw_list
+
+    def __iter__(self):
+        return iter(self.tolist())
 
     def __bool__(self):
         if self.ndim == 0:
@@ -345,33 +359,33 @@ class ndarray:
 
     def __eq__(self, other):
         if _is_ndarray(other):
-            return _wrap_result(self._array.__eq__(other._array), self._dtype)
-        return _wrap_result(self._array.__eq__(other), self._dtype)
+            return _wrap_result(self._array.__eq__(other._array), "bool")
+        return _wrap_result(self._array.__eq__(other), "bool")
 
     def __ne__(self, other):
         if _is_ndarray(other):
-            return _wrap_result(self._array.__ne__(other._array), self._dtype)
-        return _wrap_result(self._array.__ne__(other), self._dtype)
+            return _wrap_result(self._array.__ne__(other._array), "bool")
+        return _wrap_result(self._array.__ne__(other), "bool")
 
     def __lt__(self, other):
         if _is_ndarray(other):
-            return _wrap_result(self._array.__lt__(other._array), self._dtype)
-        return _wrap_result(self._array.__lt__(other), self._dtype)
+            return _wrap_result(self._array.__lt__(other._array), "bool")
+        return _wrap_result(self._array.__lt__(other), "bool")
 
     def __le__(self, other):
         if _is_ndarray(other):
-            return _wrap_result(self._array.__le__(other._array), self._dtype)
-        return _wrap_result(self._array.__le__(other), self._dtype)
+            return _wrap_result(self._array.__le__(other._array), "bool")
+        return _wrap_result(self._array.__le__(other), "bool")
 
     def __gt__(self, other):
         if _is_ndarray(other):
-            return _wrap_result(self._array.__gt__(other._array), self._dtype)
-        return _wrap_result(self._array.__gt__(other), self._dtype)
+            return _wrap_result(self._array.__gt__(other._array), "bool")
+        return _wrap_result(self._array.__gt__(other), "bool")
 
     def __ge__(self, other):
         if _is_ndarray(other):
-            return _wrap_result(self._array.__ge__(other._array), self._dtype)
-        return _wrap_result(self._array.__ge__(other), self._dtype)
+            return _wrap_result(self._array.__ge__(other._array), "bool")
+        return _wrap_result(self._array.__ge__(other), "bool")
 
     def __round__(self, ndigits=None):
         if ndigits is None:
@@ -705,6 +719,39 @@ class ndarray:
         """测试是否有任何元素为真。"""
         return _core.any(self._array)
 
+    def byteswap(self, inplace=False):
+        """交换数组中每个元素的字节顺序（大小端转换）。"""
+        data = self._array.flatten().tolist()
+        dtype = getattr(self, '_dtype', 'float64')
+        
+        swapped = []
+        for v in data:
+            if isinstance(v, float):
+                v = int(v)
+            if dtype in ('int16', 'uint16'):
+                swapped_val = ((v & 0xFF) << 8) | ((v >> 8) & 0xFF)
+            elif dtype in ('int32', 'uint32'):
+                swapped_val = ((v & 0xFF) << 24) | ((v >> 8 & 0xFF) << 16) | ((v >> 16 & 0xFF) << 8) | ((v >> 24) & 0xFF)
+            elif dtype in ('int64', 'uint64'):
+                swapped_val = 0
+                for i in range(8):
+                    swapped_val |= ((v >> (i * 8)) & 0xFF) << ((7 - i) * 8)
+            else:
+                swapped_val = v
+            swapped.append(swapped_val)
+        
+        if inplace:
+            arr = _core.ndarray(swapped)
+            arr = arr.reshape(self._array.shape)
+            self._array = arr
+            return self
+        else:
+            return ndarray(swapped, _dtype=dtype)
+
+    def view(self, dtype=None):
+        """创建一个新的数组对象，共享相同的数据但拥有不同的视图。"""
+        return ndarray(self._array, _dtype=getattr(self, '_dtype', 'float64'))
+
 
 def _ensure(x):
     """将列表/元组转换为 ndarray。"""
@@ -748,8 +795,12 @@ def _wrap_result(result, dtype="float64"):
     """将原始 ndarray 结果包装到 ndarray 类中。"""
     if hasattr(result, '__class__') and result.__class__.__name__ == 'ndarray':
         return ndarray._wrap(result, _dtype=dtype)
+    if isinstance(result, (list, tuple)):
+        return ndarray(result, _dtype=dtype)
     if isinstance(result, float) and dtype == "int64":
         return int(result)
+    if hasattr(result, 'tolist'):
+        return ndarray._wrap(result, _dtype=dtype)
     return result
 
 
@@ -1221,6 +1272,79 @@ def asanyarray(a, dtype=None, order=None):
     return asarray(a, dtype, order)
 
 
+def matrix(data, dtype=None, copy=True):
+    """从数组或字符串创建矩阵对象。"""
+    if isinstance(data, str):
+        rows = data.split(';')
+        data = []
+        for row in rows:
+            elements = row.split(',')
+            data.append([float(e.strip()) for e in elements])
+    return asarray(data, dtype=dtype)
+
+
+def asmatrix(data, dtype=None):
+    """将输入转换为矩阵对象。"""
+    return asarray(data, dtype=dtype)
+
+
+def bmat(obj, ldict=None, gdict=None):
+    """从字符串、嵌套序列或数组构建矩阵。"""
+    if isinstance(obj, str):
+        obj = obj.strip()
+        if obj.startswith('[') and obj.endswith(']'):
+            obj = obj[1:-1].strip()
+        rows = obj.split(';')
+        data = []
+        for row in rows:
+            elements = row.split(',')
+            row_data = []
+            for e in elements:
+                e = e.strip()
+                if e.startswith('[') and e.endswith(']'):
+                    inner = e[1:-1].split()
+                    row_data.extend([float(x) for x in inner])
+                else:
+                    row_data.append(float(e))
+            data.append(row_data)
+        return asarray(data)
+    if isinstance(obj, (list, tuple)):
+        if isinstance(obj[0], (list, tuple)):
+            if isinstance(obj[0][0], (list, tuple)):
+                rows = []
+                for row_block in obj:
+                    row_len = sum(len(block[0]) for block in row_block)
+                    # current_row = [0.0] * row_len
+                    col_start = 0
+                    for block in row_block:
+                        b_arr = _to_ndarray(block)
+                        b_rows, b_cols = b_arr.shape
+                        for i in range(b_rows):
+                            if i >= len(rows):
+                                rows.append([0.0] * row_len)
+                            for j in range(b_cols):
+                                rows[i][col_start + j] = b_arr[i, j]
+                        col_start += b_cols
+                return asarray(rows)
+            else:
+                return asarray(obj)
+        else:
+            return asarray(obj)
+    return _to_ndarray(obj)
+
+
+def repmat(a, m, n):
+    """将数组或矩阵重复 m 行 n 列。"""
+    a = _to_ndarray(a)
+    if a.ndim == 1:
+        a = a.reshape(1, a.size)
+    result = []
+    for _ in range(m):
+        for row in range(a.shape[0]):
+            result.append(a[row].tolist() * n)
+    return asarray(result)
+
+
 def _to_ndarray(obj):
     """将任意数组类对象转换为 rsnumpy ndarray（不依赖第三方库）。"""
     if _is_ndarray(obj):
@@ -1255,8 +1379,10 @@ def _resolve_dtype(dtype):
     dt_str = dtype if isinstance(dtype, str) else dtype.__name__
     if dt_str in ("complex", "complex128", "complex64", "cfloat", "cdouble"):
         return "complex128"
-    if dt_str in ("int", "int8", "int16", "int32", "int64", "intp", "int_", "intc"):
+    if dt_str in ("int", "int_", "intp", "intc"):
         return "int64"
+    if dt_str in ("int8", "int16", "int32", "int64"):
+        return dt_str
     if dt_str in ("uint", "uint8", "uint16", "uint32", "uint64"):
         return dt_str
     if dt_str in ("bool", "bool_"):
@@ -2134,7 +2260,13 @@ argmax = _statistics_module.argmax
 argmin = _statistics_module.argmin
 argsort = _statistics_module.argsort
 sort = _statistics_module.sort
+msort = _statistics_module.msort
+sort_complex = _statistics_module.sort_complex
+lexsort = _statistics_module.lexsort
+partition = _statistics_module.partition
+argpartition = _statistics_module.argpartition
 searchsorted = _statistics_module.searchsorted
+extract = _statistics_module.extract
 cov = _statistics_module.cov
 corrcoef = _statistics_module.corrcoef
 histogram = _statistics_module.histogram
@@ -2146,12 +2278,20 @@ digitize = _statistics_module.digitize
 
 linalg = _linalg_module()
 random = _random_module()
+matlib = _matlib_module
+
+dot = linalg.dot
+vdot = linalg.vdot
+inner = linalg.inner
+matmul = linalg.matmul
 
 
 # ========== 导出列表 ==========
 __all__ = [
     'ndarray', 'NdArrayIter',
     'array', 'asarray', 'asanyarray', 'copy',
+    'matrix', 'asmatrix', 'bmat', 'repmat',
+    'dot', 'vdot', 'inner', 'matmul',
     'zeros', 'zeros_like', 'ones', 'ones_like', 'full', 'full_like',
     'empty', 'empty_like', 'eye', 'identity',
     'arange', 'linspace', 'logspace', 'geomspace',
@@ -2178,7 +2318,7 @@ __all__ = [
     'greater', 'less', 'equal', 'logical_and', 'logical_or', 'isclose', 'allclose',
     'sum', 'mean', 'std', 'var', 'min', 'max', 'amin', 'amax', 'ptp',
     'median', 'average', 'percentile', 'quantile', 'nanmedian', 'nanpercentile',
-    'argmax', 'argmin', 'argsort', 'sort', 'searchsorted',
+    'argmax', 'argmin', 'argsort', 'sort', 'searchsorted', 'extract',
     'cov', 'corrcoef',
     'histogram', 'histogram2d', 'histogramdd', 'digitize',
     'fft', 'ifft', 'rfft', 'irfft',
@@ -2187,5 +2327,5 @@ __all__ = [
     'isnan', 'isinf', 'isfinite',
     'save', 'load', 'loadtxt', 'savetxt', 'savez',
     'Poly', 'polyval', 'polyfit', 'polyder', 'polyint', 'polyroots',
-    'linalg', 'random', 'load_npz'
+    'linalg', 'random', 'matlib', 'load_npz'
 ]

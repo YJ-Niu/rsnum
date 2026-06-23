@@ -30,6 +30,10 @@ uv.lock
 Thumbs.db
 
 # Data / plots
+out.txt
+outfile.npy
+runoob.npz
+outfile2
 push*.sh
 main*.py
 test*.py

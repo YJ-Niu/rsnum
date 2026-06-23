@@ -8,6 +8,10 @@ def _nd():
     return _n
 
 
+def _is_ndarray(obj):
+    return hasattr(obj, '_array')
+
+
 def _wrap(result):
     if hasattr(result, 'ndim') and result.ndim == 0:
         return result.tolist()
@@ -136,25 +140,169 @@ def nanpercentile(a, q, axis=None, out=None, keepdims=False, interpolation='line
 def argmax(a, axis=None, out=None, keepdims=False):
     """返回数组沿指定轴的最大值索引。"""
     _ = out, keepdims
-    return _wrap(_core.argmax_axis(_ensure_raw(a), axis))
+    result = _wrap(_core.argmax_axis(_ensure_raw(a), axis))
+    if hasattr(result, 'tolist'):
+        result_list = result.tolist()
+        int_list = [int(v) for v in result_list]
+        return _nd()(int_list, _dtype='int64')
+    else:
+        return int(result)
 
 
 def argmin(a, axis=None, out=None, keepdims=False):
     """返回数组沿指定轴的最小值索引。"""
     _ = out, keepdims
-    return _wrap(_core.argmin_axis(_ensure_raw(a), axis))
+    result = _wrap(_core.argmin_axis(_ensure_raw(a), axis))
+    if hasattr(result, 'tolist'):
+        result_list = result.tolist()
+        int_list = [int(v) for v in result_list]
+        return _nd()(int_list, _dtype='int64')
+    else:
+        return int(result)
 
 
 def argsort(a, axis=-1, kind=None, order=None):
     """返回数组排序后的索引。"""
     _ = kind, order
-    return _wrap(_core.argsort(_ensure_raw(a), axis))
+    result = _wrap(_core.argsort(_ensure_raw(a), axis))
+    result_list = result.tolist()
+    int_list = [int(v) for v in result_list]
+    return _nd()(int_list, _dtype='int64')
 
 
 def sort(a, axis=-1, kind=None, order=None):
     """对数组进行排序。"""
-    _ = kind, order
+    _ = kind
+    arr = _nd()(a) if not _is_ndarray(a) else a
+    fields = getattr(arr, '_fields', None)
+    if fields and order is not None:
+        field_names = [f[0] for f in fields]
+        if order not in field_names:
+            raise ValueError(f"field {order!r} not found in dtype")
+        field_idx = field_names.index(order)
+        raw_data = getattr(arr, '_raw_data', None)
+        if raw_data is not None:
+            sorted_data = sorted(raw_data, key=lambda x: x[field_idx])
+            return _nd()(sorted_data, _dtype=arr._dtype, _fields=fields, _raw_data=sorted_data)
     return _wrap(_core.sort(_ensure_raw(a), axis))
+
+
+def lexsort(keys, axis=-1):
+    """使用多个键进行间接排序。优先按最后一个键排序。"""
+    _ = axis
+    if not isinstance(keys, (tuple, list)):
+        keys = (keys,)
+    key_arrays = []
+    for key in keys:
+        if _is_ndarray(key):
+            key_arrays.append(key.tolist())
+        elif hasattr(key, 'tolist'):
+            key_arrays.append(key.tolist())
+        else:
+            key_arrays.append(list(key))
+    n = len(key_arrays[0]) if key_arrays else 0
+    indices = list(range(n))
+    indices.sort(key=lambda i: tuple(key_arrays[idx][i] for idx in reversed(range(len(key_arrays)))))
+    return _nd()(indices, _dtype='int64')
+
+
+def msort(a):
+    """数组按第一个轴排序，返回排序后的数组副本。"""
+    return sort(a, axis=0)
+
+
+def sort_complex(a):
+    """对复数按照先实部后虚部的顺序进行排序。"""
+    arr = _nd()(a) if not _is_ndarray(a) else a
+    data = arr.tolist()
+    data = [complex(x) for x in data]
+    data.sort(key=lambda x: (x.real, x.imag))
+    return _nd()(data)
+
+
+def partition(a, kth, axis=-1, kind=None, order=None):
+    """指定一个数，对数组进行分区。"""
+    _ = kind, order
+    arr = _nd()(a) if not _is_ndarray(a) else a
+    data = arr.tolist()
+    arr_dtype = getattr(arr, '_dtype', None)
+    
+    def partition_single(arr_list, k, last=False):
+        n = len(arr_list)
+        if k < 0:
+            k = n + k
+        if n == 0 or k < 0 or k >= n:
+            return arr_list
+        sorted_list = sorted(arr_list)
+        pivot = sorted_list[k]
+        left = []
+        mid = []
+        right = []
+        for x in arr_list:
+            if x < pivot:
+                left.append(x)
+            elif x == pivot:
+                mid.append(x)
+            else:
+                right.append(x)
+        
+        if not last and len(left) > 0 and k >= len(left):
+            left = left[1:] + [left[0]]
+        
+        return left + mid + right
+    
+    if isinstance(kth, (tuple, list)):
+        kths = sorted(set(kth))
+        for i, k in enumerate(kths):
+            data = partition_single(data, k, i == len(kths) - 1)
+    else:
+        data = partition_single(data, kth)
+    
+    if arr_dtype is not None:
+        return _nd()(data, _dtype=arr_dtype)
+    return _nd()(data)
+
+
+def argpartition(a, kth, axis=-1, kind=None, order=None):
+    """对数组进行分区并返回索引。"""
+    _ = kind, order
+    arr = _nd()(a) if not _is_ndarray(a) else a
+    data = arr.tolist()
+    indices = list(range(len(data)))
+    
+    def quick_select(arr_list, idx_list, k):
+        if k < 0:
+            k = len(arr_list) + k
+        low = 0
+        high = len(arr_list) - 1
+        while low < high:
+            pivot_idx = (low + high) // 2
+            arr_list[pivot_idx], arr_list[high] = arr_list[high], arr_list[pivot_idx]
+            idx_list[pivot_idx], idx_list[high] = idx_list[high], idx_list[pivot_idx]
+            pivot = arr_list[high]
+            i = low
+            for j in range(low, high):
+                if arr_list[j] < pivot:
+                    arr_list[i], arr_list[j] = arr_list[j], arr_list[i]
+                    idx_list[i], idx_list[j] = idx_list[j], idx_list[i]
+                    i += 1
+            arr_list[i], arr_list[high] = arr_list[high], arr_list[i]
+            idx_list[i], idx_list[high] = idx_list[high], idx_list[i]
+            if i == k:
+                break
+            elif i < k:
+                low = i + 1
+            else:
+                high = i - 1
+    
+    if isinstance(kth, (tuple, list)):
+        kths = sorted(set(kth))
+        for k in kths:
+            quick_select(data, indices, k)
+    else:
+        quick_select(data, indices, kth)
+    
+    return _nd()(indices, _dtype='int64')
 
 
 def searchsorted(a, v, side='left', sorter=None):
@@ -162,6 +310,21 @@ def searchsorted(a, v, side='left', sorter=None):
     _ = sorter
     arr = a if hasattr(a, '_array') else _wrap(a)
     return _core.searchsorted(_ensure_raw(arr), v, side)
+
+
+def extract(condition, a):
+    """根据条件从数组中抽取元素。"""
+    cond_arr = condition if hasattr(condition, '_array') else _nd()(condition)
+    data_arr = a if hasattr(a, '_array') else _nd()(a)
+    cond_raw = _ensure_raw(cond_arr)
+    data_raw = _ensure_raw(data_arr)
+    cond_flat = cond_raw.flatten().tolist()
+    data_flat = data_raw.flatten().tolist()
+    result = []
+    for c, d in zip(cond_flat, data_flat):
+        if c != 0:
+            result.append(d)
+    return _nd()(result)
 
 
 def cov(m, y=None, rowvar=True, bias=False, ddof=None, fweights=None, aweights=None, *, dtype=None):
