@@ -1338,11 +1338,7 @@ def repmat(a, m, n):
     a = _to_ndarray(a)
     if a.ndim == 1:
         a = a.reshape(1, a.size)
-    result = []
-    for _ in range(m):
-        for row in range(a.shape[0]):
-            result.append(a[row].tolist() * n)
-    return asarray(result)
+    return tile(a, (m, n))
 
 
 def _to_ndarray(obj):
@@ -1468,28 +1464,28 @@ def zeros_like(a, dtype=None, order='K', subok=True, shape=None):
     """返回与输入形状相同的零数组。"""
     arr = ndarray(a)
     _dtype = dtype if dtype is not None else getattr(arr, '_dtype', 'float64')
-    return zeros(arr.shape, dtype=_dtype)
+    return ndarray(_core.zeros_like(arr._array), _dtype=_dtype)
 
 
 def ones_like(a, dtype=None, order='K', subok=True, shape=None):
     """返回与输入形状相同的1数组。"""
     arr = ndarray(a)
     _dtype = dtype if dtype is not None else getattr(arr, '_dtype', 'float64')
-    return ones(arr.shape, dtype=_dtype)
+    return ndarray(_core.ones_like(arr._array), _dtype=_dtype)
 
 
 def empty_like(a, dtype=None, order='K', subok=True, shape=None):
     """返回与输入形状相同的空数组。"""
     arr = ndarray(a)
     _dtype = dtype if dtype is not None else getattr(arr, '_dtype', 'float64')
-    return empty(arr.shape, dtype=_dtype)
+    return ndarray(_core.empty_like(arr._array), _dtype=_dtype)
 
 
 def full_like(a, fill_value, dtype=None, order='K', subok=True, shape=None):
     """返回与输入形状相同的填充数组。"""
     arr = ndarray(a)
     _dtype = dtype if dtype is not None else getattr(arr, '_dtype', 'float64')
-    return full(arr.shape, fill_value, dtype=_dtype)
+    return ndarray(_core.full_like(arr._array, float(fill_value)), _dtype=_dtype)
 
 
 def eye(N, M=None, k=0, dtype=None, order='C'):
@@ -1517,32 +1513,25 @@ def linspace(start, stop, num=50, endpoint=True, retstep=False, dtype=None, axis
     start_val = _scalar(_ensure(start))
     stop_val = _scalar(_ensure(stop))
     _dtype = _resolve_dtype(dtype)
-    if num == 1:
-        result = ndarray([start_val], _dtype=_dtype)
-        step = 0.0
-    else:
-        result = ndarray(_core.linspace(start_val, stop_val, num, endpoint=endpoint))
-        if _dtype != "float64":
-            result._dtype = _dtype
-        step = (stop_val - start_val) / (num - 1) if endpoint else (stop_val - start_val) / num
+    result = ndarray(_core.linspace(start_val, stop_val, num, endpoint=endpoint), _dtype=_dtype)
     if retstep:
+        step = (stop_val - start_val) / (num - 1) if endpoint else (stop_val - start_val) / num
         return result, _float64(step)
     return result
 
 
 def logspace(start, stop, num=50, endpoint=True, base=10.0, dtype=None, axis=0):
     """返回对数刻度上均匀间隔的数字。"""
-    return power(ndarray([float(base)]), linspace(start, stop, num, endpoint))
+    _dtype = _resolve_dtype(dtype) if dtype else "float64"
+    return ndarray(_core.logspace(float(start), float(stop), num, float(base)), _dtype=_dtype)
 
 
 def geomspace(start, stop, num=50, endpoint=True, dtype=None, axis=0):
     """返回几何级数上均匀间隔的数字。"""
-    import math
     if start <= 0 or stop <= 0:
         raise ValueError("geomspace requires positive start and stop values")
-    log_start = math.log(start)
-    log_stop = math.log(stop)
-    return exp(linspace(log_start, log_stop, num, endpoint))
+    _dtype = _resolve_dtype(dtype) if dtype else "float64"
+    return ndarray(_core.geomspace(float(start), float(stop), num), _dtype=_dtype)
 
 
 # ========== 索引函数 ==========
@@ -1943,12 +1932,7 @@ def isnan(x):
 
 def binary_repr(num, width=None):
     """返回整数的二进制表示字符串。"""
-    if width is None:
-        width = num.bit_length() or 1
-    if num >= 0:
-        return format(num, 'b').zfill(width)
-    # 负数：补码表示
-    return format((1 << width) + num, 'b').zfill(width)
+    return _core.binary_repr(num, width)
 
 
 def isinf(x):

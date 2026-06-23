@@ -1639,6 +1639,38 @@ fn empty(shape: &Bound<'_, PyAny>) -> PyResult<NdArray> {
     Ok(NdArray { data })
 }
 
+#[pyfunction]
+fn zeros_like(a: &NdArray) -> PyResult<NdArray> {
+    Ok(NdArray {
+        data: Array::from_elem(a.data.shape(), 0.0),
+    })
+}
+
+#[pyfunction]
+fn ones_like(a: &NdArray) -> PyResult<NdArray> {
+    Ok(NdArray {
+        data: Array::from_elem(a.data.shape(), 1.0),
+    })
+}
+
+#[pyfunction]
+fn empty_like(a: &NdArray) -> PyResult<NdArray> {
+    let shape = a.data.shape().to_vec();
+    let size: usize = shape.iter().product();
+    let mut v: Vec<f64> = Vec::with_capacity(size);
+    unsafe { v.set_len(size); }
+    let data = Array::from_shape_vec(IxDyn(&shape), v)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(NdArray { data })
+}
+
+#[pyfunction]
+fn full_like(a: &NdArray, fill_value: f64) -> PyResult<NdArray> {
+    Ok(NdArray {
+        data: Array::from_elem(a.data.shape(), fill_value),
+    })
+}
+
 // ===== Math Functions =====
 
 fn unary_math_op(x: &NdArray, op: fn(f64) -> f64) -> NdArray {
@@ -3427,9 +3459,9 @@ fn heaviside(x: &NdArray, h0: f64) -> NdArray {
 }
 
 #[pyfunction]
-fn logspace(start: f64, stop: f64, num: usize) -> PyResult<NdArray> {
-    linspace(start, stop, num, false).map(|nd| {
-        NdArray { data: nd.data.mapv(|v| 10.0_f64.powf(v)) }
+fn logspace(start: f64, stop: f64, num: usize, base: f64) -> PyResult<NdArray> {
+    linspace(start, stop, num, true).map(|nd| {
+        NdArray { data: nd.data.mapv(|v| base.powf(v)) }
     })
 }
 
@@ -4949,7 +4981,8 @@ fn binary_repr(num: i64, width: Option<usize>) -> String {
     let w = if let Some(w) = width {
         w
     } else {
-        num.abs().leading_zeros().max(1) as usize
+        let bits = 64 - num.abs().leading_zeros();
+        if bits == 0 { 1 } else { bits as usize }
     };
     
     if num >= 0 {
@@ -5049,6 +5082,10 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(linspace, m)?)?;
     m.add_function(wrap_pyfunction!(full, m)?)?;
     m.add_function(wrap_pyfunction!(empty, m)?)?;
+    m.add_function(wrap_pyfunction!(zeros_like, m)?)?;
+    m.add_function(wrap_pyfunction!(ones_like, m)?)?;
+    m.add_function(wrap_pyfunction!(empty_like, m)?)?;
+    m.add_function(wrap_pyfunction!(full_like, m)?)?;
 
     m.add_function(wrap_pyfunction!(sin, m)?)?;
     m.add_function(wrap_pyfunction!(cos, m)?)?;
