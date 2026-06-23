@@ -4944,6 +4944,21 @@ fn _format_int_str(arr: &NdArray) -> String {
     format_int_array(&arr.data)
 }
 
+#[pyfunction]
+fn binary_repr(num: i64, width: Option<usize>) -> String {
+    let w = if let Some(w) = width {
+        w
+    } else {
+        num.abs().leading_zeros().max(1) as usize
+    };
+    
+    if num >= 0 {
+        format!("{:0width$b}", num, width = w)
+    } else {
+        format!("{:0width$b}", (1 << w) + num, width = w)
+    }
+}
+
 // ===== Float64 Formatting (always show decimal point for integer values) =====
 
 fn compute_max_width_float(arr: &Array<f64, IxDyn>) -> usize {
@@ -5196,6 +5211,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(polymul, m)?)?;
     m.add_function(wrap_pyfunction!(argmax_axis, m)?)?;
     m.add_function(wrap_pyfunction!(argmin_axis, m)?)?;
+    m.add_function(wrap_pyfunction!(binary_repr, m)?)?;
 
     m.add_function(wrap_pyfunction!(_format_complex_repr, m)?)?;
     m.add_function(wrap_pyfunction!(_format_complex_str, m)?)?;

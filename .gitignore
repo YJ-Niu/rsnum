@@ -21,7 +21,6 @@ uv.lock
 # IDE
 .vscode/
 .idea/
-.trae/
 *.swp
 *.swo
 *~
@@ -46,3 +45,6 @@ check*.py
 .venv
 .env
 .env.local
+.trae/
+.trae/rules/git-commit-message.md
+git-commit-message.md
