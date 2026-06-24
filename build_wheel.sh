@@ -4,16 +4,26 @@ set -euo pipefail
 # Build Rust lib into Python wheel using maturin
 # Usage: scripts/build_wheel.sh [--release|--debug] [--out-dir DIR] [--python PYTHON_EXEC]
 
+# ========== 从 Cargo.toml 读取元信息 ==========
+NAME=$(grep -m1 '^name = ' Cargo.toml | sed 's/name = "\(.*\)"/\1/')
+VERSION=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+
+echo "Project: $NAME, Version: $VERSION"
+
+# ========== 同步版本到 pyproject.toml ==========
+sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+echo "  -> pyproject.toml version updated to $VERSION"
+
+# ========== 同步版本到 python/rsnumpy/__init__.py ==========
+sed -i '' "s/^__version__ = \".*\"/__version__ = \"$VERSION\"/" python/rsnumpy/__init__.py
+echo "  -> python/rsnumpy/__init__.py __version__ updated to $VERSION"
+
 RELEASE=true
 OUT_DIR="wheelhouse"
-cache_file="/Users/user/Desktop/rust_project/rsplotlib/python/rsplotlib/rsplotlib.cpython-313-darwin.so"
+
 # 如果 wheelhouse 目录存在, 则删除
 if [[ -d "$OUT_DIR" ]]; then
   rm -rf "$OUT_DIR"
-fi
-# 如果 cache_file 目录存在, 则删除
-if [[ -f "$cache_file" ]]; then
-  rm "$cache_file"
 fi
 
 # Default python executable; may be overridden by --python or positional arg

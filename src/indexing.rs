@@ -38,7 +38,7 @@ fn parse_single_index(item: &Bound<'_, PyAny>, dim_size: isize) -> PyResult<Inde
             return Ok(IndexDesc::Fancy(fancy));
         }
         
-        let mut fancy: Vec<usize> = Vec::new();
+        let mut fancy: Vec<usize> = Vec::with_capacity(list.len());
         let mut all_int = true;
         for e in list.iter() {
             if let Ok(v) = e.extract::<isize>() {
@@ -180,7 +180,8 @@ fn fancy_cartesian(a: &Array<f64, IxDyn>, dim_lists: &[Vec<usize>]) -> Vec<f64> 
     let data = a.as_slice_memory_order().unwrap();
     
     let mut indices: Vec<usize> = vec![0; dim_lists.len()];
-    let mut result = Vec::new();
+    let total_result: usize = dim_lists.iter().map(|dl| dl.len()).product();
+    let mut result = Vec::with_capacity(total_result);
     
     loop {
         let mut flat_idx = 0;

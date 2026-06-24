@@ -10,7 +10,7 @@ use std::hash::{Hash, Hasher};
 use crate::NdArray;
 
 thread_local! {
-    static THREAD_RNG: std::cell::RefCell<Option<::rand::rngs::StdRng>> = std::cell::RefCell::new(None);
+    static THREAD_RNG: std::cell::RefCell<Option<::rand::rngs::StdRng>> = const { std::cell::RefCell::new(None) };
 }
 
 static GLOBAL_SEED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
@@ -37,7 +37,7 @@ fn new_rng(seed: Option<u64>) -> ::rand::rngs::StdRng {
 }
 
 fn parse_shape_from_args(args: &Bound<'_, PyTuple>) -> Vec<usize> {
-    let mut shape = Vec::new();
+    let mut shape = Vec::with_capacity(args.len());
     for item in args.iter() {
         if let Ok(val) = item.extract::<usize>() {
             shape.push(val);
@@ -53,13 +53,13 @@ fn parse_size_arg(size: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<usize>> {
             if let Ok(val) = s.extract::<usize>() {
                 Ok(vec![val])
             } else if let Ok(tup) = s.cast::<PyTuple>() {
-                let mut result = Vec::new();
+                let mut result = Vec::with_capacity(tup.len());
                 for item in tup.iter() {
                     result.push(item.extract::<usize>()?);
                 }
                 Ok(result)
             } else if let Ok(list) = s.cast::<pyo3::types::PyList>() {
-                let mut result = Vec::new();
+                let mut result = Vec::with_capacity(list.len());
                 for item in list.iter() {
                     result.push(item.extract::<usize>()?);
                 }
@@ -81,7 +81,7 @@ fn make_ndarray_parallel(
     values.resize(total, 0.0);
     
     let num_chunks = rayon::current_num_threads();
-    let chunk_size = (total + num_chunks - 1) / num_chunks;
+    let chunk_size = total.div_ceil(num_chunks);
     
     let seeds: Vec<u64> = (0..num_chunks).map(|_| rand::random()).collect();
     
@@ -247,7 +247,7 @@ impl PyGenerator {
         let vals: Vec<f64> = if let Ok(arr) = a.extract::<NdArray>() {
             arr.data.iter().copied().collect()
         } else if let Ok(list) = a.cast::<pyo3::types::PyList>() {
-            let mut v = Vec::new();
+            let mut v = Vec::with_capacity(list.len());
             for item in list.iter() {
                 v.push(item.extract::<f64>()?);
             }
@@ -441,11 +441,11 @@ impl PyGenerator {
         let mut rng = new_rng(self.seed);
         if shape.is_empty() {
             return Ok(NdArray {
-                data: Array::from_elem(IxDyn(&[]), dist.sample(&mut rng) as f64),
+                data: Array::from_elem(IxDyn(&[]), dist.sample(&mut rng)),
             });
         }
         let total: usize = shape.iter().product();
-        let values: Vec<f64> = (0..total).map(|_| dist.sample(&mut rng) as f64).collect();
+        let values: Vec<f64> = (0..total).map(|_| dist.sample(&mut rng)).collect();
         let arr = Array::from_shape_vec(IxDyn(&shape), values)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(NdArray { data: arr })
@@ -472,7 +472,7 @@ impl PyGenerator {
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         let mut rng = new_rng(self.seed);
         if shape.is_empty() {
-            let u = uniform.sample(&mut rng) as f64;
+            let u: f64 = uniform.sample(&mut rng);
             let val = loc + scale * (u / (1.0 - u)).ln();
             return Ok(NdArray {
                 data: Array::from_elem(IxDyn(&[]), val),
@@ -480,7 +480,7 @@ impl PyGenerator {
         }
         let total: usize = shape.iter().product();
         let values: Vec<f64> = (0..total).map(|_| {
-            let u = uniform.sample(&mut rng) as f64;
+            let u: f64 = uniform.sample(&mut rng);
             loc + scale * (u / (1.0 - u)).ln()
         }).collect();
         let arr = Array::from_shape_vec(IxDyn(&shape), values)
