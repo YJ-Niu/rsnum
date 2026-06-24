@@ -1,6 +1,6 @@
 """rsnumpy.matlib - 矩阵库模块"""
 
-import random
+import rsnumpy._core as _core
 
 
 def empty(shape, dtype=None, order='C'):
@@ -8,10 +8,8 @@ def empty(shape, dtype=None, order='C'):
     from .__init__ import ndarray
     if isinstance(shape, int):
         shape = (shape, shape)
-    size = shape[0] * shape[1]
-    raw_data = [random.random() * 1e-300 for _ in range(size)]
-    arr = ndarray(raw_data, _dtype=dtype or 'float64')
-    return arr.reshape(shape)
+    raw = _core.random.uniform(0.0, 1e-300, shape)
+    return ndarray(raw, _dtype=dtype or 'float64')
 
 
 def zeros(shape, dtype=None, order='C'):
@@ -19,10 +17,7 @@ def zeros(shape, dtype=None, order='C'):
     from .__init__ import ndarray
     if isinstance(shape, int):
         shape = (shape, shape)
-    size = shape[0] * shape[1]
-    raw_data = [0.0] * size
-    arr = ndarray(raw_data, _dtype=dtype or 'float64')
-    return arr.reshape(shape)
+    return ndarray(_core.zeros(shape), _dtype=dtype or 'float64')
 
 
 def ones(shape, dtype=None, order='C'):
@@ -30,22 +25,15 @@ def ones(shape, dtype=None, order='C'):
     from .__init__ import ndarray
     if isinstance(shape, int):
         shape = (shape, shape)
-    size = shape[0] * shape[1]
-    raw_data = [1.0] * size
-    arr = ndarray(raw_data, _dtype=dtype or 'float64')
-    return arr.reshape(shape)
+    return ndarray(_core.ones(shape), _dtype=dtype or 'float64')
 
 
 def eye(n, M=None, k=0, dtype=None, order='C'):
     """返回一个矩阵，对角线元素为 1，其他位置为零。"""
+    from .__init__ import ndarray
     if M is None:
         M = n
-    arr = zeros((n, M), dtype=dtype)
-    for i in range(n):
-        j = i + k
-        if 0 <= j < M:
-            arr[i, j] = 1.0
-    return arr
+    return ndarray(_core.eye(n, M, k), _dtype=dtype or 'float64')
 
 
 def identity(n, dtype=None):
@@ -60,10 +48,8 @@ def rand(*args):
         shape = (args[0], args[0])
     else:
         shape = args
-    size = shape[0] * shape[1]
-    raw_data = [random.random() for _ in range(size)]
-    arr = ndarray(raw_data, _dtype='float64')
-    return arr.reshape(shape)
+    raw = _core.random.rand(*shape)
+    return ndarray(raw, _dtype='float64')
 
 
 def randn(*args):
@@ -73,10 +59,8 @@ def randn(*args):
         shape = (args[0], args[0])
     else:
         shape = args
-    size = shape[0] * shape[1]
-    raw_data = [random.gauss(0, 1) for _ in range(size)]
-    arr = ndarray(raw_data, _dtype='float64')
-    return arr.reshape(shape)
+    raw = _core.random.randn(*shape)
+    return ndarray(raw, _dtype='float64')
 
 
 __all__ = ['empty', 'zeros', 'ones', 'eye', 'identity', 'rand', 'randn']

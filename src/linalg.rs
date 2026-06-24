@@ -1,312 +1,298 @@
 use ndarray::{Array, IxDyn};
+use ndarray::linalg::Dot;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use rayon::prelude::*;
 
 use crate::NdArray;
 
 /// 点积
 #[pyfunction]
-fn dot(a: &NdArray, b: &NdArray) -> PyResult<NdArray> {
-    let a_data = &a.data;
-    let b_data = &b.data;
-    let a_shape = a_data.shape().to_vec();
-    let b_shape = b_data.shape().to_vec();
+fn dot(_py: Python<'_>, a: &NdArray, b: &NdArray) -> PyResult<NdArray> {
+    _py.detach(move || {
+        let a_data = &a.data;
+        let b_data = &b.data;
+        let a_shape = a_data.shape().to_vec();
+        let b_shape = b_data.shape().to_vec();
 
-    if a_shape.len() == 1 && b_shape.len() == 1 {
-        if a_shape[0] != b_shape[0] {
-            return Err(PyValueError::new_err(format!(
-                "Incompatible shapes for dot product: {:?} and {:?}",
-                a_shape, b_shape
-            )));
+        if a_shape.len() == 1 && b_shape.len() == 1 {
+            if a_shape[0] != b_shape[0] {
+                return Err(PyValueError::new_err(format!(
+                    "Incompatible shapes for dot product: {:?} and {:?}",
+                    a_shape, b_shape
+                )));
+            }
+            let result: f64 = a_data.iter().zip(b_data.iter()).map(|(x, y)| x * y).sum();
+            return Ok(NdArray {
+                data: Array::from_elem(IxDyn(&[]), result),
+            });
         }
-        let result: f64 = a_data.iter().zip(b_data.iter()).map(|(x, y)| x * y).sum();
-        return Ok(NdArray {
-            data: Array::from_elem(IxDyn(&[]), result),
-        });
-    }
 
-    if a_shape.len() == 2 && b_shape.len() == 2 {
-        if a_shape[1] != b_shape[0] {
-            return Err(PyValueError::new_err(format!(
-                "Incompatible shapes for dot product: {:?} and {:?}",
-                a_shape, b_shape
-            )));
+        if a_shape.len() == 2 && b_shape.len() == 2 {
+            if a_shape[1] != b_shape[0] {
+                return Err(PyValueError::new_err(format!(
+                    "Incompatible shapes for dot product: {:?} and {:?}",
+                    a_shape, b_shape
+                )));
+            }
+            let result = a_data.dot(b_data);
+            return Ok(NdArray {
+                data: result.into_dyn(),
+            });
         }
-        let m = a_shape[0];
-        let n = a_shape[1];
-        let p = b_shape[1];
-        let mut result = vec![0.0_f64; m * p];
-        for i in 0..m {
+
+        if a_shape.len() == 1 && b_shape.len() == 2 {
+            if a_shape[0] != b_shape[0] {
+                return Err(PyValueError::new_err(format!(
+                    "Incompatible shapes for dot product: {:?} and {:?}",
+                    a_shape, b_shape
+                )));
+            }
+            let n = a_shape[0];
+            let p = b_shape[1];
+            let mut result = vec![0.0_f64; p];
             for j in 0..p {
                 let mut sum = 0.0;
                 for k in 0..n {
-                    sum += a_data[[i, k]] * b_data[[k, j]];
+                    sum += a_data[k] * b_data[[k, j]];
                 }
-                result[i * p + j] = sum;
+                result[j] = sum;
             }
+            let arr = Array::from_shape_vec(IxDyn(&[p]), result)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            return Ok(NdArray { data: arr });
         }
-        let arr = Array::from_shape_vec((m, p), result)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        return Ok(NdArray {
-            data: arr.into_dyn(),
-        });
-    }
 
-    if a_shape.len() == 1 && b_shape.len() == 2 {
-        if a_shape[0] != b_shape[0] {
-            return Err(PyValueError::new_err(format!(
-                "Incompatible shapes for dot product: {:?} and {:?}",
-                a_shape, b_shape
-            )));
-        }
-        let n = a_shape[0];
-        let p = b_shape[1];
-        let mut result = vec![0.0_f64; p];
-        for j in 0..p {
-            let mut sum = 0.0;
-            for k in 0..n {
-                sum += a_data[k] * b_data[[k, j]];
+        if a_shape.len() == 2 && b_shape.len() == 1 {
+            if a_shape[1] != b_shape[0] {
+                return Err(PyValueError::new_err(format!(
+                    "Incompatible shapes for dot product: {:?} and {:?}",
+                    a_shape, b_shape
+                )));
             }
-            result[j] = sum;
-        }
-        let arr = Array::from_shape_vec(IxDyn(&[p]), result)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        return Ok(NdArray { data: arr });
-    }
-
-    if a_shape.len() == 2 && b_shape.len() == 1 {
-        if a_shape[1] != b_shape[0] {
-            return Err(PyValueError::new_err(format!(
-                "Incompatible shapes for dot product: {:?} and {:?}",
-                a_shape, b_shape
-            )));
-        }
-        let m = a_shape[0];
-        let n = a_shape[1];
-        let mut result = vec![0.0_f64; m];
-        for i in 0..m {
-            let mut sum = 0.0;
-            for k in 0..n {
-                sum += a_data[[i, k]] * b_data[k];
+            let m = a_shape[0];
+            let n = a_shape[1];
+            let mut result = vec![0.0_f64; m];
+            for i in 0..m {
+                let mut sum = 0.0;
+                for k in 0..n {
+                    sum += a_data[[i, k]] * b_data[k];
+                }
+                result[i] = sum;
             }
-            result[i] = sum;
+            let arr = Array::from_shape_vec(IxDyn(&[m]), result)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            return Ok(NdArray { data: arr });
         }
-        let arr = Array::from_shape_vec(IxDyn(&[m]), result)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        return Ok(NdArray { data: arr });
-    }
 
-    Err(PyValueError::new_err(format!(
-        "Unsupported shapes for dot product: {:?} and {:?}",
-        a_shape, b_shape
-    )))
+        Err(PyValueError::new_err(format!(
+            "Unsupported shapes for dot product: {:?} and {:?}",
+            a_shape, b_shape
+        )))
+    })
 }
 
 /// 向量点积（展开为一维）
 #[pyfunction]
-fn vdot(a: &NdArray, b: &NdArray) -> PyResult<f64> {
-    let a_flat: Vec<f64> = a.data.iter().copied().collect();
-    let b_flat: Vec<f64> = b.data.iter().copied().collect();
-    if a_flat.len() != b_flat.len() {
-        return Err(PyValueError::new_err(format!(
-            "vdot requires same number of elements: {} vs {}",
-            a_flat.len(),
-            b_flat.len()
-        )));
-    }
-    let result: f64 = a_flat.iter().zip(b_flat.iter()).map(|(x, y)| x * y).sum();
-    Ok(result)
+fn vdot(_py: Python<'_>, a: &NdArray, b: &NdArray) -> PyResult<f64> {
+    _py.detach(move || {
+        let a_flat: Vec<f64> = a.data.iter().copied().collect();
+        let b_flat: Vec<f64> = b.data.iter().copied().collect();
+        if a_flat.len() != b_flat.len() {
+            return Err(PyValueError::new_err(format!(
+                "vdot requires same number of elements: {} vs {}",
+                a_flat.len(),
+                b_flat.len()
+            )));
+        }
+        let result: f64 = a_flat.iter().zip(b_flat.iter()).map(|(x, y)| x * y).sum();
+        Ok(result)
+    })
 }
 
 /// 内积
 #[pyfunction]
-fn inner(a: &NdArray, b: &NdArray) -> PyResult<NdArray> {
-    let a_data = &a.data;
-    let b_data = &b.data;
-    let a_shape = a_data.shape().to_vec();
-    let b_shape = b_data.shape().to_vec();
+fn inner(_py: Python<'_>, a: &NdArray, b: &NdArray) -> PyResult<NdArray> {
+    _py.detach(move || {
+        let a_data = &a.data;
+        let b_data = &b.data;
+        let a_shape = a_data.shape().to_vec();
+        let b_shape = b_data.shape().to_vec();
 
-    if a_shape.len() == 1 && b_shape.len() == 1 {
-        if a_shape[0] != b_shape[0] {
-            return Err(PyValueError::new_err(format!(
-                "Incompatible shapes for inner product: {:?} and {:?}",
-                a_shape, b_shape
-            )));
-        }
-        let result: f64 = a_data.iter().zip(b_data.iter()).map(|(x, y)| x * y).sum();
-        return Ok(NdArray {
-            data: Array::from_elem(IxDyn(&[]), result),
-        });
-    }
-
-    if a_shape.len() == 2 && b_shape.len() == 2 {
-        if a_shape[1] != b_shape[1] {
-            return Err(PyValueError::new_err(format!(
-                "Incompatible shapes for inner product: {:?} and {:?}",
-                a_shape, b_shape
-            )));
-        }
-        let m = a_shape[0];
-        let n = a_shape[1];
-        let p = b_shape[0];
-        let mut result = vec![0.0_f64; m * p];
-        for i in 0..m {
-            for j in 0..p {
-                let mut sum = 0.0;
-                for k in 0..n {
-                    sum += a_data[[i, k]] * b_data[[j, k]];
-                }
-                result[i * p + j] = sum;
+        if a_shape.len() == 1 && b_shape.len() == 1 {
+            if a_shape[0] != b_shape[0] {
+                return Err(PyValueError::new_err(format!(
+                    "Incompatible shapes for inner product: {:?} and {:?}",
+                    a_shape, b_shape
+                )));
             }
+            let result: f64 = a_data.iter().zip(b_data.iter()).map(|(x, y)| x * y).sum();
+            return Ok(NdArray {
+                data: Array::from_elem(IxDyn(&[]), result),
+            });
         }
-        let arr = Array::from_shape_vec((m, p), result)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        return Ok(NdArray {
-            data: arr.into_dyn(),
-        });
-    }
 
-    Err(PyValueError::new_err(format!(
-        "Unsupported shapes for inner product: {:?} and {:?}",
-        a_shape, b_shape
-    )))
-}
-
-/// 矩阵乘法
-#[pyfunction]
-fn matmul(a: &NdArray, b: &NdArray) -> PyResult<NdArray> {
-    let a_data = &a.data;
-    let b_data = &b.data;
-    let a_shape = a_data.shape().to_vec();
-    let b_shape = b_data.shape().to_vec();
-
-    if a_shape.len() == 1 && b_shape.len() == 1 {
-        if a_shape[0] != b_shape[0] {
-            return Err(PyValueError::new_err(format!(
-                "Incompatible shapes for matmul: {:?} and {:?}",
-                a_shape, b_shape
-            )));
-        }
-        let result: f64 = a_data.iter().zip(b_data.iter()).map(|(x, y)| x * y).sum();
-        return Ok(NdArray {
-            data: Array::from_elem(IxDyn(&[]), result),
-        });
-    }
-
-    if a_shape.len() == 2 && b_shape.len() == 1 {
-        if a_shape[1] != b_shape[0] {
-            return Err(PyValueError::new_err(format!(
-                "Incompatible shapes for matmul: {:?} and {:?}",
-                a_shape, b_shape
-            )));
-        }
-        let m = a_shape[0];
-        let n = a_shape[1];
-        let mut result = vec![0.0_f64; m];
-        for i in 0..m {
-            let mut sum = 0.0;
-            for k in 0..n {
-                sum += a_data[[i, k]] * b_data[k];
+        if a_shape.len() == 2 && b_shape.len() == 2 {
+            if a_shape[1] != b_shape[1] {
+                return Err(PyValueError::new_err(format!(
+                    "Incompatible shapes for inner product: {:?} and {:?}",
+                    a_shape, b_shape
+                )));
             }
-            result[i] = sum;
-        }
-        let arr = Array::from_shape_vec(IxDyn(&[m]), result)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        return Ok(NdArray { data: arr });
-    }
-
-    if a_shape.len() == 1 && b_shape.len() == 2 {
-        if a_shape[0] != b_shape[0] {
-            return Err(PyValueError::new_err(format!(
-                "Incompatible shapes for matmul: {:?} and {:?}",
-                a_shape, b_shape
-            )));
-        }
-        let n = a_shape[0];
-        let p = b_shape[1];
-        let mut result = vec![0.0_f64; p];
-        for j in 0..p {
-            let mut sum = 0.0;
-            for k in 0..n {
-                sum += a_data[k] * b_data[[k, j]];
-            }
-            result[j] = sum;
-        }
-        let arr = Array::from_shape_vec(IxDyn(&[p]), result)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        return Ok(NdArray { data: arr });
-    }
-
-    if a_shape.len() == 2 && b_shape.len() == 2 {
-        if a_shape[1] != b_shape[0] {
-            return Err(PyValueError::new_err(format!(
-                "Incompatible shapes for matmul: {:?} and {:?}",
-                a_shape, b_shape
-            )));
-        }
-        let m = a_shape[0];
-        let n = a_shape[1];
-        let p = b_shape[1];
-        let mut result = vec![0.0_f64; m * p];
-        for i in 0..m {
-            for j in 0..p {
-                let mut sum = 0.0;
-                for k in 0..n {
-                    sum += a_data[[i, k]] * b_data[[k, j]];
-                }
-                result[i * p + j] = sum;
-            }
-        }
-        let arr = Array::from_shape_vec((m, p), result)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        return Ok(NdArray {
-            data: arr.into_dyn(),
-        });
-    }
-
-    if a_shape.len() >= 3 && b_shape.len() == 2 {
-        let batch_dims: Vec<usize> = a_shape[..a_shape.len() - 2].to_vec();
-        let m = a_shape[a_shape.len() - 2];
-        let n = a_shape[a_shape.len() - 1];
-        let p = b_shape[1];
-        if n != b_shape[0] {
-            return Err(PyValueError::new_err(format!(
-                "Incompatible shapes for matmul: {:?} and {:?}",
-                a_shape, b_shape
-            )));
-        }
-        let batch_size: usize = batch_dims.iter().product();
-        let mut result = vec![0.0_f64; batch_size * m * p];
-        for b_idx in 0..batch_size {
+            let m = a_shape[0];
+            let n = a_shape[1];
+            let p = b_shape[0];
+            let mut result = vec![0.0_f64; m * p];
             for i in 0..m {
                 for j in 0..p {
                     let mut sum = 0.0;
                     for k in 0..n {
-                        let a_val = if a_shape.len() == 3 {
-                            a_data[[b_idx, i, k]]
-                        } else {
-                            a_data[[0, b_idx, i, k]]
-                        };
-                        let b_val = b_data[[k, j]];
-                        sum += a_val * b_val;
+                        sum += a_data[[i, k]] * b_data[[j, k]];
                     }
-                    result[b_idx * m * p + i * p + j] = sum;
+                    result[i * p + j] = sum;
                 }
             }
+            let arr = Array::from_shape_vec((m, p), result)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            return Ok(NdArray {
+                data: arr.into_dyn(),
+            });
         }
-        let mut result_shape = batch_dims.clone();
-        result_shape.extend_from_slice(&[m, p]);
-        let arr = Array::from_shape_vec(result_shape, result)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        return Ok(NdArray {
-            data: arr.into_dyn(),
-        });
-    }
 
-    Err(PyValueError::new_err(format!(
-        "Unsupported shapes for matmul: {:?} and {:?}",
-        a_shape, b_shape
-    )))
+        Err(PyValueError::new_err(format!(
+            "Unsupported shapes for inner product: {:?} and {:?}",
+            a_shape, b_shape
+        )))
+    })
+}
+
+/// 矩阵乘法
+#[pyfunction]
+fn matmul(_py: Python<'_>, a: &NdArray, b: &NdArray) -> PyResult<NdArray> {
+    _py.detach(move || {
+        let a_data = &a.data;
+        let b_data = &b.data;
+        let a_shape = a_data.shape().to_vec();
+        let b_shape = b_data.shape().to_vec();
+
+        if a_shape.len() == 1 && b_shape.len() == 1 {
+            if a_shape[0] != b_shape[0] {
+                return Err(PyValueError::new_err(format!(
+                    "Incompatible shapes for matmul: {:?} and {:?}",
+                    a_shape, b_shape
+                )));
+            }
+            let result: f64 = a_data.iter().zip(b_data.iter()).map(|(x, y)| x * y).sum();
+            return Ok(NdArray {
+                data: Array::from_elem(IxDyn(&[]), result),
+            });
+        }
+
+        if a_shape.len() == 2 && b_shape.len() == 1 {
+            if a_shape[1] != b_shape[0] {
+                return Err(PyValueError::new_err(format!(
+                    "Incompatible shapes for matmul: {:?} and {:?}",
+                    a_shape, b_shape
+                )));
+            }
+            let m = a_shape[0];
+            let n = a_shape[1];
+            let mut result = vec![0.0_f64; m];
+            for i in 0..m {
+                let mut sum = 0.0;
+                for k in 0..n {
+                    sum += a_data[[i, k]] * b_data[k];
+                }
+                result[i] = sum;
+            }
+            let arr = Array::from_shape_vec(IxDyn(&[m]), result)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            return Ok(NdArray { data: arr });
+        }
+
+        if a_shape.len() == 1 && b_shape.len() == 2 {
+            if a_shape[0] != b_shape[0] {
+                return Err(PyValueError::new_err(format!(
+                    "Incompatible shapes for matmul: {:?} and {:?}",
+                    a_shape, b_shape
+                )));
+            }
+            let n = a_shape[0];
+            let p = b_shape[1];
+            let mut result = vec![0.0_f64; p];
+            for j in 0..p {
+                let mut sum = 0.0;
+                for k in 0..n {
+                    sum += a_data[k] * b_data[[k, j]];
+                }
+                result[j] = sum;
+            }
+            let arr = Array::from_shape_vec(IxDyn(&[p]), result)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            return Ok(NdArray { data: arr });
+        }
+
+        if a_shape.len() == 2 && b_shape.len() == 2 {
+            if a_shape[1] != b_shape[0] {
+                return Err(PyValueError::new_err(format!(
+                    "Incompatible shapes for matmul: {:?} and {:?}",
+                    a_shape, b_shape
+                )));
+            }
+            let result = a_data.dot(b_data);
+            return Ok(NdArray {
+                data: result.into_dyn(),
+            });
+        }
+
+        if a_shape.len() >= 3 && b_shape.len() == 2 {
+            let batch_dims: Vec<usize> = a_shape[..a_shape.len() - 2].to_vec();
+            let m = a_shape[a_shape.len() - 2];
+            let n = a_shape[a_shape.len() - 1];
+            let p = b_shape[1];
+            if n != b_shape[0] {
+                return Err(PyValueError::new_err(format!(
+                    "Incompatible shapes for matmul: {:?} and {:?}",
+                    a_shape, b_shape
+                )));
+            }
+            let batch_size: usize = batch_dims.iter().product();
+            let mut result = vec![0.0_f64; batch_size * m * p];
+            
+            result.par_chunks_mut(m * p).enumerate().for_each(|(b_idx, chunk)| {
+                let mut row = vec![0.0_f64; p];
+                for i in 0..m {
+                    for j in 0..p {
+                        let mut sum = 0.0;
+                        for k in 0..n {
+                            let a_val = if a_shape.len() == 3 {
+                                a_data[[b_idx, i, k]]
+                            } else {
+                                a_data[[0, b_idx, i, k]]
+                            };
+                            let b_val = b_data[[k, j]];
+                            sum += a_val * b_val;
+                        }
+                        row[j] = sum;
+                    }
+                    chunk[i * p..(i + 1) * p].copy_from_slice(&row);
+                }
+            });
+            
+            let mut result_shape = batch_dims.clone();
+            result_shape.extend_from_slice(&[m, p]);
+            let arr = Array::from_shape_vec(result_shape, result)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            return Ok(NdArray {
+                data: arr.into_dyn(),
+            });
+        }
+
+        Err(PyValueError::new_err(format!(
+            "Unsupported shapes for matmul: {:?} and {:?}",
+            a_shape, b_shape
+        )))
+    })
 }
 
 /// 矩阵求逆 (2x2, 3x3)
@@ -577,95 +563,97 @@ fn eig3x3(a: &Array<f64, IxDyn>) -> (Array<f64, IxDyn>, Array<f64, IxDyn>) {
 
 #[pyfunction]
 #[pyo3(signature = (x, ord=None, axis=None))]
-fn norm(x: &NdArray, ord: Option<f64>, axis: Option<isize>) -> PyResult<NdArray> {
-    let shape = x.data.shape().to_vec();
-    let data = &x.data;
-    let ord = ord.unwrap_or(2.0);
-    if let Some(ax) = axis {
-        let ax = if ax < 0 { (shape.len() as isize + ax) as usize } else { ax as usize };
-        if ax >= shape.len() {
-            return Err(PyValueError::new_err(format!("axis out of bounds")));
-        }
-        if shape.len() == 2 {
-            let nrows = shape[0];
-            let ncols = shape[1];
-            if ax == 0 {
-                let mut result = vec![0.0; ncols];
-                for j in 0..ncols {
-                    let mut s = 0.0;
-                    for i in 0..nrows {
-                        let v = data[[i, j]];
-                        if ord == 1.0 { s += v.abs(); }
-                        else if ord == 2.0 { s += v * v; }
-                        else if ord == f64::INFINITY { s = s.max(v.abs()); }
-                        else { return Err(PyValueError::new_err(format!("Unsupported norm order: {}", ord))); }
-                    }
-                    if ord == 2.0 { s = s.sqrt(); }
-                    result[j] = s;
-                }
-                let arr = Array::from_shape_vec(IxDyn(&[ncols]), result)
-                    .map_err(|e| PyValueError::new_err(e.to_string()))?;
-                Ok(NdArray { data: arr })
-            } else {
-                let mut result = vec![0.0; nrows];
-                for i in 0..nrows {
-                    let mut s = 0.0;
+fn norm(_py: Python<'_>, x: &NdArray, ord: Option<f64>, axis: Option<isize>) -> PyResult<NdArray> {
+    _py.detach(move || {
+        let shape = x.data.shape().to_vec();
+        let data = &x.data;
+        let ord = ord.unwrap_or(2.0);
+        if let Some(ax) = axis {
+            let ax = if ax < 0 { (shape.len() as isize + ax) as usize } else { ax as usize };
+            if ax >= shape.len() {
+                return Err(PyValueError::new_err("axis out of bounds".to_string()));
+            }
+            if shape.len() == 2 {
+                let nrows = shape[0];
+                let ncols = shape[1];
+                if ax == 0 {
+                    let mut result = vec![0.0; ncols];
                     for j in 0..ncols {
-                        let v = data[[i, j]];
-                        if ord == 1.0 { s += v.abs(); }
-                        else if ord == 2.0 { s += v * v; }
-                        else if ord == f64::INFINITY { s = s.max(v.abs()); }
-                        else { return Err(PyValueError::new_err(format!("Unsupported norm order: {}", ord))); }
+                        let mut s = 0.0;
+                        for i in 0..nrows {
+                            let v = data[[i, j]];
+                            if ord == 1.0 { s += v.abs(); }
+                            else if ord == 2.0 { s += v * v; }
+                            else if ord == f64::INFINITY { s = s.max(v.abs()); }
+                            else { return Err(PyValueError::new_err(format!("Unsupported norm order: {}", ord))); }
+                        }
+                        if ord == 2.0 { s = s.sqrt(); }
+                        result[j] = s;
                     }
-                    if ord == 2.0 { s = s.sqrt(); }
-                    result[i] = s;
+                    let arr = Array::from_shape_vec(IxDyn(&[ncols]), result)
+                        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+                    Ok(NdArray { data: arr })
+                } else {
+                    let mut result = vec![0.0; nrows];
+                    for i in 0..nrows {
+                        let mut s = 0.0;
+                        for j in 0..ncols {
+                            let v = data[[i, j]];
+                            if ord == 1.0 { s += v.abs(); }
+                            else if ord == 2.0 { s += v * v; }
+                            else if ord == f64::INFINITY { s = s.max(v.abs()); }
+                            else { return Err(PyValueError::new_err(format!("Unsupported norm order: {}", ord))); }
+                        }
+                        if ord == 2.0 { s = s.sqrt(); }
+                        result[i] = s;
+                    }
+                    let arr = Array::from_shape_vec(IxDyn(&[nrows]), result)
+                        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+                    Ok(NdArray { data: arr })
                 }
-                let arr = Array::from_shape_vec(IxDyn(&[nrows]), result)
-                    .map_err(|e| PyValueError::new_err(e.to_string()))?;
-                Ok(NdArray { data: arr })
+            } else {
+                Err(PyValueError::new_err("norm with axis only supports 2D arrays"))
+            }
+        } else if shape.len() == 1 {
+            if ord == 1.0 {
+                let val: f64 = data.iter().map(|v| v.abs()).sum();
+                Ok(NdArray { data: Array::from_elem(IxDyn(&[]), val) })
+            } else if ord == 2.0 {
+                let val: f64 = data.iter().map(|v| v * v).sum::<f64>().sqrt();
+                Ok(NdArray { data: Array::from_elem(IxDyn(&[]), val) })
+            } else if ord == f64::INFINITY {
+                let val = data.iter().fold(0.0f64, |a, b| a.max(b.abs()));
+                Ok(NdArray { data: Array::from_elem(IxDyn(&[]), val) })
+            } else {
+                Err(PyValueError::new_err(format!("Unsupported norm order for 1D array: {}", ord)))
+            }
+        } else if shape.len() == 2 {
+            if ord == 1.0 {
+                let ncols = shape[1];
+                let mut max_sum = 0.0;
+                for j in 0..ncols {
+                    let s: f64 = (0..shape[0]).map(|i| data[[i, j]].abs()).sum();
+                    if s > max_sum { max_sum = s; }
+                }
+                Ok(NdArray { data: Array::from_elem(IxDyn(&[]), max_sum) })
+            } else if ord == 2.0 {
+                let val: f64 = data.iter().map(|v| v * v).sum::<f64>().sqrt();
+                Ok(NdArray { data: Array::from_elem(IxDyn(&[]), val) })
+            } else if ord == f64::INFINITY {
+                let ncols = shape[1];
+                let mut max_sum = 0.0;
+                for i in 0..shape[0] {
+                    let s: f64 = (0..ncols).map(|j| data[[i, j]].abs()).sum();
+                    if s > max_sum { max_sum = s; }
+                }
+                Ok(NdArray { data: Array::from_elem(IxDyn(&[]), max_sum) })
+            } else {
+                Err(PyValueError::new_err(format!("Unsupported norm order for matrix: {}", ord)))
             }
         } else {
-            Err(PyValueError::new_err("norm with axis only supports 2D arrays"))
+            Err(PyValueError::new_err(format!("norm not supported for {}D array", shape.len())))
         }
-    } else if shape.len() == 1 {
-        if ord == 1.0 {
-            let val: f64 = data.iter().map(|v| v.abs()).sum();
-            Ok(NdArray { data: Array::from_elem(IxDyn(&[]), val) })
-        } else if ord == 2.0 {
-            let val: f64 = data.iter().map(|v| v * v).sum::<f64>().sqrt();
-            Ok(NdArray { data: Array::from_elem(IxDyn(&[]), val) })
-        } else if ord == f64::INFINITY {
-            let val = data.iter().fold(0.0f64, |a, b| a.max(b.abs()));
-            Ok(NdArray { data: Array::from_elem(IxDyn(&[]), val) })
-        } else {
-            Err(PyValueError::new_err(format!("Unsupported norm order for 1D array: {}", ord)))
-        }
-    } else if shape.len() == 2 {
-        if ord == 1.0 {
-            let ncols = shape[1];
-            let mut max_sum = 0.0;
-            for j in 0..ncols {
-                let s: f64 = (0..shape[0]).map(|i| data[[i, j]].abs()).sum();
-                if s > max_sum { max_sum = s; }
-            }
-            Ok(NdArray { data: Array::from_elem(IxDyn(&[]), max_sum) })
-        } else if ord == 2.0 {
-            let val: f64 = data.iter().map(|v| v * v).sum::<f64>().sqrt();
-            Ok(NdArray { data: Array::from_elem(IxDyn(&[]), val) })
-        } else if ord == f64::INFINITY {
-            let ncols = shape[1];
-            let mut max_sum = 0.0;
-            for i in 0..shape[0] {
-                let s: f64 = (0..ncols).map(|j| data[[i, j]].abs()).sum();
-                if s > max_sum { max_sum = s; }
-            }
-            Ok(NdArray { data: Array::from_elem(IxDyn(&[]), max_sum) })
-        } else {
-            Err(PyValueError::new_err(format!("Unsupported norm order for matrix: {}", ord)))
-        }
-    } else {
-        Err(PyValueError::new_err(format!("norm not supported for {}D array", shape.len())))
-    }
+    })
 }
 
 #[pyfunction]
@@ -1049,8 +1037,8 @@ fn diagonal(a: &NdArray) -> PyResult<NdArray> {
     }
     let n = shape[0].min(shape[1]);
     let mut result = vec![0.0; n];
-    for i in 0..n {
-        result[i] = a.data[[i, i]];
+    for (i, r) in result.iter_mut().enumerate() {
+        *r = a.data[[i, i]];
     }
     let arr = Array::from_shape_vec(IxDyn(&[n]), result)
         .map_err(|e| PyValueError::new_err(e.to_string()))?;

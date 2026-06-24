@@ -3,6 +3,7 @@ use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyFloat, PyList, PySlice, PyTuple};
 use rayon::prelude::*;
+use std::fmt::Write;
 
 mod linalg;
 mod random;
@@ -17,8 +18,8 @@ pub(crate) fn parse_py_list_to_flat(data: &Bound<'_, PyAny>) -> PyResult<(Vec<f6
         if list.is_empty() {
             return Ok((vec![], vec![0]));
         }
-        let mut all_values = Vec::new();
-        let mut child_shapes: Vec<Vec<usize>> = Vec::new();
+        let mut all_values = Vec::with_capacity(list.len());
+        let mut child_shapes: Vec<Vec<usize>> = Vec::with_capacity(list.len());
         for item in list.iter() {
             let (vals, shape) = parse_py_list_to_flat(&item)?;
             all_values.extend(vals);
@@ -48,7 +49,7 @@ pub(crate) fn parse_py_list_to_flat(data: &Bound<'_, PyAny>) -> PyResult<(Vec<f6
 
 fn shape_to_vec(shape: &Bound<'_, PyAny>) -> PyResult<Vec<usize>> {
     if let Ok(tup) = shape.cast::<PyTuple>() {
-        let mut result = Vec::new();
+        let mut result = Vec::with_capacity(tup.len());
         for item in tup.iter() {
             result.push(item.extract::<usize>()?);
         }
@@ -58,7 +59,7 @@ fn shape_to_vec(shape: &Bound<'_, PyAny>) -> PyResult<Vec<usize>> {
         return Ok(vec![val]);
     }
     if let Ok(list) = shape.cast::<PyList>() {
-        let mut result = Vec::new();
+        let mut result = Vec::with_capacity(list.len());
         for item in list.iter() {
             result.push(item.extract::<usize>()?);
         }
@@ -113,14 +114,18 @@ fn format_array_repr_inner(arr: &Array<f64, IxDyn>, _prefix: &str, pad_width: us
         return format!("{}", arr.iter().next().copied().unwrap_or(0.0_f64));
     }
     if arr.ndim() == 1 {
-        let mut s = String::from("[");
+        let n = arr.len();
+        // 预分配：每个数字 pad_width + 1（空格）
+        let estimated = 2 + n * (pad_width.max(1) + 1);
+        let mut s = String::with_capacity(estimated);
+        s.push('[');
         for (i, val) in arr.iter().enumerate() {
             if i > 0 {
-                s.push_str(" ");
+                s.push(' ');
             }
             let val_str = format_scalar(*val);
             if pad_width > 0 {
-                s.push_str(&format!("{:>width$}", val_str, width = pad_width));
+                let _ = write!(s, "{:>width$}", val_str, width = pad_width);
             } else {
                 s.push_str(&val_str);
             }
@@ -128,8 +133,11 @@ fn format_array_repr_inner(arr: &Array<f64, IxDyn>, _prefix: &str, pad_width: us
         s.push(']');
         return s;
     }
-    let mut s = String::from("[");
     let n = arr.shape()[0];
+    // 粗略估计字符串大小
+    let estimated = 2 + n * 20; // 每行约 20 字符
+    let mut s = String::with_capacity(estimated);
+    s.push('[');
     for i in 0..n {
         if i > 0 {
             s.push_str("\n ");
@@ -138,7 +146,7 @@ fn format_array_repr_inner(arr: &Array<f64, IxDyn>, _prefix: &str, pad_width: us
         let row_str = format_array_repr_inner(&sub, "", pad_width);
         s.push_str(&row_str);
     }
-    s.push_str("]");
+    s.push(']');
     s
 }
 
@@ -268,7 +276,7 @@ impl NdArray {
         }
 
         if let Ok(list) = index.cast::<PyList>() {
-            let mut bools = Vec::new();
+            let mut bools = Vec::with_capacity(list.len());
             for item in list.iter() {
                 if let Ok(b) = item.extract::<bool>() {
                     bools.push(b);
@@ -277,7 +285,7 @@ impl NdArray {
                 }
             }
             let flat_data: Vec<f64> = data.iter().copied().collect();
-            let mut result = Vec::new();
+            let mut result = Vec::with_capacity(bools.len());
             for (i, &b) in bools.iter().enumerate() {
                 if b && i < flat_data.len() {
                     result.push(flat_data[i]);
@@ -292,7 +300,7 @@ impl NdArray {
 
         if let Ok(arr) = index.extract::<NdArray>() {
             let flat_data: Vec<f64> = data.iter().copied().collect();
-            let mut result = Vec::new();
+            let mut result = Vec::with_capacity(flat_data.len());
             for (i, &v) in arr.data.iter().enumerate() {
                 if v != 0.0 && i < flat_data.len() {
                     result.push(flat_data[i]);
@@ -454,6 +462,11 @@ impl NdArray {
     }
 
     #[getter]
+    fn flags<'a>(&self, py: Python<'a>) -> PyResult<Bound<'a, ArrayFlags>> {
+        Bound::new(py, ArrayFlags {})
+    }
+
+    #[getter]
     #[pyo3(name = "T")]
     fn t(&self) -> PyResult<NdArray> {
         if self.data.ndim() <= 1 {
@@ -469,7 +482,7 @@ impl NdArray {
     fn reshape(&self, shape: &Bound<'_, PyAny>) -> PyResult<NdArray> {
         // 使用 isize 解析，支持 -1
         let s: Vec<isize> = if let Ok(tup) = shape.cast::<PyTuple>() {
-            let mut result = Vec::new();
+            let mut result = Vec::with_capacity(tup.len());
             for item in tup.iter() {
                 result.push(item.extract::<isize>()?);
             }
@@ -477,7 +490,7 @@ impl NdArray {
         } else if let Ok(val) = shape.extract::<isize>() {
             vec![val]
         } else if let Ok(list) = shape.cast::<PyList>() {
-            let mut result = Vec::new();
+            let mut result = Vec::with_capacity(list.len());
             for item in list.iter() {
                 result.push(item.extract::<isize>()?);
             }
@@ -850,20 +863,18 @@ impl NdArray {
         let shape = self.data.shape().to_vec();
         let d1 = if axis1 < ndim { shape[axis1] } else { return Err(PyValueError::new_err("axis1 out of bounds")); };
         let d2 = if axis2 < ndim { shape[axis2] } else { return Err(PyValueError::new_err("axis2 out of bounds")); };
-        let mut diag = Vec::new();
-        let offset_abs = offset.unsigned_abs() as usize;
+        let offset_abs = offset.unsigned_abs();
         let i_start = if offset >= 0 { 0 } else { offset_abs };
         let j_start = if offset >= 0 { offset_abs } else { 0 };
         let n = d1.min(d2).saturating_sub(offset_abs);
+        let mut diag = Vec::with_capacity(n);
         for k in 0..n {
             let mut coords = vec![0usize; ndim];
-            for d in 0..ndim {
+            for (d, coord) in coords.iter_mut().enumerate() {
                 if d == axis1 {
-                    coords[d] = i_start + k;
+                    *coord = i_start + k;
                 } else if d == axis2 {
-                    coords[d] = j_start + k;
-                } else {
-                    coords[d] = 0;
+                    *coord = j_start + k;
                 }
             }
             diag.push(self.data[IxDyn(&coords)]);
@@ -1490,6 +1501,65 @@ where
         .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
+/// ArrayFlags - 数组内存布局信息，与 NumPy 的 np.ndarray.flags 兼容
+#[pyclass(name = "ArrayFlags")]
+struct ArrayFlags {}
+
+#[pymethods]
+#[allow(non_snake_case)]
+impl ArrayFlags {
+    #[getter]
+    fn C_CONTIGUOUS(&self) -> bool {
+        true
+    }
+
+    #[getter]
+    fn F_CONTIGUOUS(&self) -> bool {
+        true
+    }
+
+    #[getter]
+    fn OWNDATA(&self) -> bool {
+        true
+    }
+
+    #[getter]
+    fn WRITEABLE(&self) -> bool {
+        true
+    }
+
+    #[getter]
+    fn ALIGNED(&self) -> bool {
+        true
+    }
+
+    #[getter]
+    fn WRITEBACKIFCOPY(&self) -> bool {
+        false
+    }
+
+    #[getter]
+    fn UPDATEIFCOPY(&self) -> bool {
+        false
+    }
+
+    fn __repr__(&self) -> String {
+        self.__str__()
+    }
+
+    fn __str__(&self) -> String {
+        let mut s = String::new();
+        writeln!(s, "  C_CONTIGUOUS : {}", self.C_CONTIGUOUS()).unwrap();
+        writeln!(s, "  F_CONTIGUOUS : {}", self.F_CONTIGUOUS()).unwrap();
+        writeln!(s, "  OWNDATA : {}", self.OWNDATA()).unwrap();
+        writeln!(s, "  WRITEABLE : {}", self.WRITEABLE()).unwrap();
+        writeln!(s, "  ALIGNED : {}", self.ALIGNED()).unwrap();
+        writeln!(s, "  WRITEBACKIFCOPY : {}", self.WRITEBACKIFCOPY()).unwrap();
+        writeln!(s, "  UPDATEIFCOPY : {}", self.UPDATEIFCOPY()).unwrap();
+        s.trim_end().to_string()
+    }
+}
+
 /// ndarray 迭代器
 #[pyclass(name = "ndarray_iter")]
 struct NdArrayIter {
@@ -1572,22 +1642,18 @@ fn arange(start: f64, stop: f64, step: f64) -> PyResult<NdArray> {
     if step == 0.0 {
         return Err(PyValueError::new_err("Step cannot be zero"));
     }
-    let mut values = Vec::new();
-    if step > 0.0 {
-        let n = ((stop - start) / step).ceil() as i64;
-        for i in 0..n {
-            let val = start + step * i as f64;
-            if val < stop {
-                values.push(val);
-            }
-        }
+    let n = if step > 0.0 {
+        ((stop - start) / step).ceil() as usize
     } else {
-        let n = ((start - stop) / (-step)).ceil() as i64;
-        for i in 0..n {
-            let val = start + step * i as f64;
-            if val > stop {
-                values.push(val);
-            }
+        ((start - stop) / (-step)).ceil() as usize
+    };
+    let mut values = Vec::with_capacity(n);
+    for i in 0..n {
+        let val = start + step * i as f64;
+        if step > 0.0 {
+            if val < stop { values.push(val); } else { break; }
+        } else {
+            if val > stop { values.push(val); } else { break; }
         }
     }
     let arr = Array::from_shape_vec(IxDyn(&[values.len()]), values)
@@ -1631,12 +1697,41 @@ fn empty(shape: &Bound<'_, PyAny>) -> PyResult<NdArray> {
     let s = shape_to_vec(shape)?;
     let size: usize = s.iter().product();
     // 仅分配内存，不初始化，比 zeros 更快
-    let mut v: Vec<f64> = Vec::with_capacity(size);
-    // SAFETY: f64 所有位模式都是有效的
-    unsafe { v.set_len(size); }
+    let v = vec![0.0f64; size];
     let data = Array::from_shape_vec(IxDyn(&s), v)
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(NdArray { data })
+}
+
+#[pyfunction]
+fn zeros_like(a: &NdArray) -> PyResult<NdArray> {
+    Ok(NdArray {
+        data: Array::from_elem(a.data.shape(), 0.0),
+    })
+}
+
+#[pyfunction]
+fn ones_like(a: &NdArray) -> PyResult<NdArray> {
+    Ok(NdArray {
+        data: Array::from_elem(a.data.shape(), 1.0),
+    })
+}
+
+#[pyfunction]
+fn empty_like(a: &NdArray) -> PyResult<NdArray> {
+    let shape = a.data.shape().to_vec();
+    let size: usize = shape.iter().product();
+    let v = vec![0.0f64; size];
+    let data = Array::from_shape_vec(IxDyn(&shape), v)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(NdArray { data })
+}
+
+#[pyfunction]
+fn full_like(a: &NdArray, fill_value: f64) -> PyResult<NdArray> {
+    Ok(NdArray {
+        data: Array::from_elem(a.data.shape(), fill_value),
+    })
 }
 
 // ===== Math Functions =====
@@ -1685,48 +1780,48 @@ define_math_func!(expm1, |v| v.exp_m1());
 
 #[pyfunction]
 #[pyo3(signature = (x, axis=None))]
-fn sum(x: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
-    x.sum(axis)
+fn sum(_py: Python<'_>, x: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
+    _py.detach(move || x.sum(axis))
 }
 
 #[pyfunction]
 #[pyo3(signature = (x, axis=None))]
-fn mean(x: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
-    x.mean(axis)
+fn mean(_py: Python<'_>, x: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
+    _py.detach(move || x.mean(axis))
 }
 
 #[pyfunction]
 #[pyo3(signature = (x, axis=None), name = "std")]
-fn std_dev(x: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
-    x.std(axis)
+fn std_dev(_py: Python<'_>, x: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
+    _py.detach(move || x.std(axis))
 }
 
 #[pyfunction]
 #[pyo3(signature = (x, axis=None))]
-fn var(x: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
-    x.var(axis)
+fn var(_py: Python<'_>, x: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
+    _py.detach(move || x.var(axis))
 }
 
 #[pyfunction]
 #[pyo3(signature = (x, axis=None))]
-fn min(x: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
-    x.min(axis)
+fn min(_py: Python<'_>, x: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
+    _py.detach(move || x.min(axis))
 }
 
 #[pyfunction]
 #[pyo3(signature = (x, axis=None))]
-fn max(x: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
-    x.max(axis)
+fn max(_py: Python<'_>, x: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
+    _py.detach(move || x.max(axis))
 }
 
 #[pyfunction]
-fn argmin(x: &NdArray) -> PyResult<usize> {
-    x.argmin()
+fn argmin(_py: Python<'_>, x: &NdArray) -> PyResult<usize> {
+    _py.detach(move || x.argmin())
 }
 
 #[pyfunction]
-fn argmax(x: &NdArray) -> PyResult<usize> {
-    x.argmax()
+fn argmax(_py: Python<'_>, x: &NdArray) -> PyResult<usize> {
+    _py.detach(move || x.argmax())
 }
 
 // ===== Array Operations =====
@@ -1734,7 +1829,7 @@ fn argmax(x: &NdArray) -> PyResult<usize> {
 #[pyfunction]
 fn concatenate(arrays: &Bound<'_, PyAny>, axis: usize) -> PyResult<NdArray> {
     let list = arrays.cast::<PyList>()?;
-    let mut ndarrays: Vec<Array<f64, IxDyn>> = Vec::new();
+    let mut ndarrays: Vec<Array<f64, IxDyn>> = Vec::with_capacity(list.len());
     for item in list.iter() {
         let nd = item.extract::<NdArray>()?;
         ndarrays.push(nd.data);
@@ -1753,38 +1848,34 @@ fn concatenate(arrays: &Bound<'_, PyAny>, axis: usize) -> PyResult<NdArray> {
 #[pyfunction]
 fn stack(arrays: &Bound<'_, PyAny>, axis: usize) -> PyResult<NdArray> {
     let list = arrays.cast::<PyList>()?;
-    let mut ndarrays: Vec<Array<f64, IxDyn>> = Vec::new();
+    let mut ndarrays: Vec<NdArray> = Vec::with_capacity(list.len());
     for item in list.iter() {
-        let nd = item.extract::<NdArray>()?;
-        ndarrays.push(nd.data);
+        ndarrays.push(item.extract::<NdArray>()?);
     }
     if ndarrays.is_empty() {
         return Err(PyValueError::new_err("Need at least one array"));
     }
-    let orig_shape = ndarrays[0].shape().to_vec();
+    let orig_shape = ndarrays[0].data.shape().to_vec();
     for arr in &ndarrays[1..] {
-        if arr.shape() != orig_shape.as_slice() {
+        if arr.data.shape() != orig_shape.as_slice() {
             return Err(PyValueError::new_err("All arrays must have the same shape"));
         }
     }
-    let mut flat_result = Array::zeros(IxDyn(&[0]));
-    for (i, arr) in ndarrays.iter().enumerate() {
+    // 一次性收集所有 expanded view，避免逐个 concatenate（O(n²) → O(n)）
+    let expanded_views: Vec<_> = ndarrays.iter().map(|arr| {
         let mut s = orig_shape.clone();
         s.insert(axis, 1);
-        let expanded = arr
+        arr.data
             .clone()
             .into_shape_with_order(IxDyn(&s))
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        if i == 0 {
-            flat_result = expanded;
-        } else {
-            flat_result =
-                ndarray::concatenate(Axis(axis), &[flat_result.view(), expanded.view()])
-                    .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        }
-    }
+            .unwrap()
+            .into_dyn()
+    }).collect();
+    let views: Vec<_> = expanded_views.iter().map(|a| a.view()).collect();
+    let result = ndarray::concatenate(Axis(axis), &views)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(NdArray {
-        data: flat_result.into_dyn(),
+        data: result.into_dyn(),
     })
 }
 
@@ -1816,7 +1907,8 @@ fn where_<'py>(py: Python<'py>, condition: &NdArray, x: Option<&NdArray>, y: Opt
         (None, None) => {
             let shape = condition.data.shape();
             let ndim = shape.len();
-            let mut indices: Vec<Vec<usize>> = (0..ndim.max(1)).map(|_| Vec::new()).collect();
+            let total_elems = condition.data.len();
+            let mut indices: Vec<Vec<usize>> = (0..ndim.max(1)).map(|_| Vec::with_capacity(total_elems)).collect();
             for (flat_idx, &val) in condition.data.iter().enumerate() {
                 if val != 0.0 {
                     if ndim == 0 {
@@ -1866,8 +1958,246 @@ fn unique(a: &NdArray) -> PyResult<NdArray> {
     let mut values: Vec<u64> = a.data.iter().map(|v| v.to_bits()).collect();
     values.sort();
     values.dedup();
-    let unique_vals: Vec<f64> = values.into_iter().map(|b| f64::from_bits(b)).collect();
+    let unique_vals: Vec<f64> = values.into_iter().map(f64::from_bits).collect();
     let arr = Array::from_shape_vec(IxDyn(&[unique_vals.len()]), unique_vals)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(NdArray { data: arr })
+}
+
+#[pyfunction]
+#[pyo3(signature = (a, return_index=false, return_inverse=false, return_counts=false))]
+fn unique_full(a: &NdArray, return_index: bool, return_inverse: bool, return_counts: bool) -> PyResult<Vec<NdArray>> {
+    let flat_data: Vec<f64> = a.data.iter().copied().collect();
+    let n = flat_data.len();
+    
+    let mut indexed: Vec<(f64, usize)> = flat_data.iter().enumerate().map(|(i, &v)| (v, i)).collect();
+    indexed.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    
+    let mut unique_vals = Vec::new();
+    let mut first_indices = Vec::new();
+    let mut counts = Vec::new();
+    
+    let mut prev_val = None;
+    let mut count = 0;
+    let mut first_idx = 0;
+    
+    for (val, orig_idx) in indexed.iter() {
+        match prev_val {
+            None => {
+                prev_val = Some(*val);
+                first_idx = *orig_idx;
+                count = 1;
+            }
+            Some(pv) => {
+                if (val - pv).abs() < 1e-15 {
+                    count += 1;
+                } else {
+                    unique_vals.push(pv);
+                    first_indices.push(first_idx as f64);
+                    counts.push(count as f64);
+                    prev_val = Some(*val);
+                    first_idx = *orig_idx;
+                    count = 1;
+                }
+            }
+        }
+    }
+    
+    if let Some(pv) = prev_val {
+        unique_vals.push(pv);
+        first_indices.push(first_idx as f64);
+        counts.push(count as f64);
+    }
+    
+    let mut inverse = Vec::new();
+    if return_inverse {
+        inverse = Vec::with_capacity(n);
+        for v in &flat_data {
+            let mut found = false;
+            for (i, uv) in unique_vals.iter().enumerate() {
+                if (v - uv).abs() < 1e-15 {
+                    inverse.push(i as f64);
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                inverse.push(0.0);
+            }
+        }
+    }
+    
+    let unique_arr = Array::from_shape_vec(IxDyn(&[unique_vals.len()]), unique_vals)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let mut results = vec![NdArray { data: unique_arr }];
+    
+    if return_index {
+        let idx_arr = Array::from_shape_vec(IxDyn(&[first_indices.len()]), first_indices)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        results.push(NdArray { data: idx_arr });
+    }
+    
+    if return_inverse {
+        let inv_arr = Array::from_shape_vec(IxDyn(&[inverse.len()]), inverse)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        results.push(NdArray { data: inv_arr });
+    }
+    
+    if return_counts {
+        let cnt_arr = Array::from_shape_vec(IxDyn(&[counts.len()]), counts)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        results.push(NdArray { data: cnt_arr });
+    }
+    
+    Ok(results)
+}
+
+#[pyfunction]
+#[pyo3(signature = (a, new_shape))]
+fn resize_rs(a: &NdArray, new_shape: Vec<usize>) -> PyResult<NdArray> {
+    let new_size: usize = new_shape.iter().product();
+    let flat_data: Vec<f64> = a.data.iter().copied().collect();
+    
+    if flat_data.is_empty() {
+        let arr = Array::from_shape_vec(IxDyn(&new_shape), Vec::new())
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        return Ok(NdArray { data: arr });
+    }
+    
+    let mut result = Vec::with_capacity(new_size);
+    for i in 0..new_size {
+        result.push(flat_data[i % flat_data.len()]);
+    }
+    
+    let arr = Array::from_shape_vec(IxDyn(&new_shape), result)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(NdArray { data: arr })
+}
+
+#[pyfunction]
+#[pyo3(signature = (a, indices, axis=None))]
+fn delete_rs(a: &NdArray, indices: Vec<isize>, axis: Option<isize>) -> PyResult<NdArray> {
+    let ndim = a.data.ndim();
+    let ax = axis.map(|x| if x < 0 { (ndim as isize + x) as usize } else { x as usize });
+    
+    let idx_set: std::collections::BTreeSet<usize> = indices
+        .iter()
+        .map(|&i| {
+            let len = if let Some(axis_idx) = ax { a.data.shape()[axis_idx] } else { a.data.len() };
+            let idx = if i < 0 { (len as isize + i) as usize } else { i as usize };
+            idx.min(len - 1)
+        })
+        .collect();
+    
+    if ax.is_none() {
+        let flat_data: Vec<f64> = a.data.iter().copied().collect();
+        let result: Vec<f64> = flat_data.into_iter()
+            .enumerate()
+            .filter(|(i, _)| !idx_set.contains(i))
+            .map(|(_, v)| v)
+            .collect();
+        let arr = Array::from_shape_vec(IxDyn(&[result.len()]), result)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        return Ok(NdArray { data: arr });
+    }
+    
+    let ax = ax.unwrap();
+    let shape = a.data.shape().to_vec();
+    let axis_size = shape[ax];
+    let pre_size: usize = shape.iter().take(ax).product();
+    let post_size: usize = shape.iter().skip(ax + 1).product();
+    
+    let flat_data: Vec<f64> = a.data.iter().copied().collect();
+    let mut result = Vec::with_capacity(pre_size * (axis_size - idx_set.len()) * post_size);
+    let block_size = axis_size * post_size;
+    
+    for outer in 0..pre_size {
+        let base = outer * block_size;
+        for i in 0..axis_size {
+            if !idx_set.contains(&i) {
+                result.extend_from_slice(&flat_data[base + i * post_size..base + (i + 1) * post_size]);
+            }
+        }
+    }
+    
+    let mut new_shape = shape;
+    new_shape[ax] = axis_size - idx_set.len();
+    let arr = Array::from_shape_vec(IxDyn(&new_shape), result)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(NdArray { data: arr })
+}
+
+#[pyfunction]
+#[pyo3(signature = (a, indices, values, axis=None))]
+fn insert_rs(a: &NdArray, indices: Vec<isize>, values: Vec<f64>, axis: Option<isize>) -> PyResult<NdArray> {
+    let ndim = a.data.ndim();
+    let ax = axis.map(|x| if x < 0 { (ndim as isize + x) as usize } else { x as usize });
+    
+    let flat_data: Vec<f64> = a.data.iter().copied().collect();
+    
+    if ax.is_none() {
+        let mut result = flat_data.clone();
+        let mut offset = 0;
+        let mut sorted_indices: Vec<isize> = indices.clone();
+        sorted_indices.sort_unstable();
+        
+        for &idx in &sorted_indices {
+            let pos = if idx < 0 { (result.len() as isize + idx + offset) as usize } else { (idx + offset) as usize };
+            let pos = pos.min(result.len());
+            
+            for &v in values.iter().rev() {
+                result.insert(pos, v);
+            }
+            offset += values.len() as isize;
+        }
+        
+        let arr = Array::from_shape_vec(IxDyn(&[result.len()]), result)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        return Ok(NdArray { data: arr });
+    }
+    
+    let ax = ax.unwrap();
+    let shape = a.data.shape().to_vec();
+    let axis_size = shape[ax];
+    let pre_size: usize = shape.iter().take(ax).product();
+    let post_size: usize = shape.iter().skip(ax + 1).product();
+    
+    let needed = pre_size * post_size;
+    let mut vals = Vec::with_capacity(needed);
+    for i in 0..needed {
+        vals.push(values[i % values.len()]);
+    }
+    
+    let idx_set: std::collections::BTreeSet<usize> = indices
+        .iter()
+        .map(|&i| {
+            let idx = if i < 0 { (axis_size as isize + i) as usize } else { i as usize };
+            idx.min(axis_size)
+        })
+        .collect();
+    
+    let new_axis_size = axis_size + idx_set.len();
+    let mut result = Vec::with_capacity(pre_size * new_axis_size * post_size);
+    let block_size = axis_size * post_size;
+    
+    for outer in 0..pre_size {
+        let base = outer * block_size;
+        let mut src_idx = 0;
+        
+        for dest_idx in 0..new_axis_size {
+            if idx_set.contains(&dest_idx) {
+                let val_base = outer * post_size;
+                result.extend_from_slice(&vals[val_base..val_base + post_size]);
+            } else {
+                result.extend_from_slice(&flat_data[base + src_idx * post_size..base + (src_idx + 1) * post_size]);
+                src_idx += 1;
+            }
+        }
+    }
+    
+    let mut new_shape = shape;
+    new_shape[ax] = new_axis_size;
+    let arr = Array::from_shape_vec(IxDyn(&new_shape), result)
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(NdArray { data: arr })
 }
@@ -1952,6 +2282,169 @@ fn partition(a: &NdArray, kth: Vec<i64>, axis: isize) -> PyResult<NdArray> {
     Ok(NdArray { data: result })
 }
 
+#[pyfunction]
+#[pyo3(signature = (a, kth, axis=-1))]
+fn argpartition(a: &NdArray, kth: Vec<i64>, axis: isize) -> PyResult<NdArray> {
+    let ndim = a.data.ndim();
+    let ax = if axis < 0 { (ndim as isize + axis) as usize } else { axis as usize };
+
+    if ndim == 0 {
+        return Ok(NdArray {
+            data: a.data.clone(),
+        });
+    }
+
+    let shape = a.data.shape().to_vec();
+    let ax_len = shape[ax];
+
+    let mut kths: Vec<usize> = kth.iter().map(|&k| {
+        let mut kk = k;
+        if kk < 0 {
+            kk += ax_len as i64;
+        }
+        if kk < 0 || kk >= ax_len as i64 {
+            Err(PyValueError::new_err("kth out of bounds"))
+        } else {
+            Ok(kk as usize)
+        }
+    }).collect::<Result<Vec<_>, _>>()?;
+    kths.sort();
+    kths.dedup();
+
+    let flat_data: Vec<f64> = a.data.iter().copied().collect();
+    let mut indices: Vec<f64> = (0..flat_data.len()).map(|i| i as f64).collect();
+    
+    let outer_size: usize = shape[..ax].iter().product();
+    let inner_size: usize = shape[ax + 1..].iter().product();
+    let outer_strides: usize = inner_size * ax_len;
+    let inner_strides = inner_size;
+
+    for outer in 0..outer_size {
+        for inner in 0..inner_size {
+            let start = outer * outer_strides + inner;
+            let mut values: Vec<(f64, usize)> = (0..ax_len)
+                .map(|i| (flat_data[start + i * inner_strides], start + i * inner_strides))
+                .collect();
+            
+            for &k in &kths {
+                let mut low = 0;
+                let mut high = ax_len - 1;
+                while low < high {
+                    let pivot_idx = (low + high) / 2;
+                    values.swap(pivot_idx, high);
+                    let pivot = values[high].0;
+                    let mut i = low;
+                    for j in low..high {
+                        if values[j].0 < pivot {
+                            values.swap(i, j);
+                            i += 1;
+                        }
+                    }
+                    values.swap(i, high);
+                    if i == k {
+                        break;
+                    } else if i < k {
+                        low = i + 1;
+                    } else {
+                        high = i - 1;
+                    }
+                }
+            }
+            
+            for (i, &(_, orig_idx)) in values.iter().enumerate() {
+                indices[start + i * inner_strides] = orig_idx as f64;
+            }
+        }
+    }
+    
+    let arr = Array::from_shape_vec(IxDyn(&shape), indices)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(NdArray { data: arr })
+}
+
+#[pyfunction]
+fn lexsort(keys: Vec<NdArray>) -> PyResult<NdArray> {
+    if keys.is_empty() {
+        return Ok(NdArray {
+            data: Array::from_shape_vec(IxDyn(&[0]), Vec::new()).unwrap(),
+        });
+    }
+    
+    let n = keys[0].data.len();
+    let mut indices: Vec<usize> = (0..n).collect();
+    
+    indices.sort_by(|&a, &b| {
+        for key in keys.iter().rev() {
+            let va = key.data[a];
+            let vb = key.data[b];
+            match va.partial_cmp(&vb) {
+                Some(std::cmp::Ordering::Equal) => continue,
+                Some(ord) => return ord,
+                None => return std::cmp::Ordering::Equal,
+            }
+        }
+        std::cmp::Ordering::Equal
+    });
+    
+    let result: Vec<f64> = indices.into_iter().map(|i| i as f64).collect();
+    let arr = Array::from_shape_vec(IxDyn(&[result.len()]), result)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(NdArray { data: arr })
+}
+
+#[pyfunction]
+fn sort_complex(a: &NdArray) -> PyResult<NdArray> {
+    let flat_data: Vec<f64> = a.data.iter().copied().collect();
+    let n = flat_data.len();
+    
+    if n == 0 {
+        return Ok(NdArray {
+            data: Array::from_shape_vec(IxDyn(&[0]), Vec::new()).unwrap(),
+        });
+    }
+    
+    let mut indexed: Vec<(f64, f64, usize)> = flat_data.iter().enumerate().map(|(i, &v)| {
+        (v, 0.0, i)
+    }).collect();
+    
+    indexed.sort_by(|a, b| {
+        match a.0.partial_cmp(&b.0) {
+            Some(std::cmp::Ordering::Equal) => a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal),
+            Some(ord) => ord,
+            None => std::cmp::Ordering::Equal,
+        }
+    });
+    
+    let mut result = Vec::with_capacity(n);
+    for (val, _, _) in indexed {
+        result.push(val);
+    }
+    
+    let shape = a.data.shape().to_vec();
+    let arr = Array::from_shape_vec(IxDyn(&shape), result)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(NdArray { data: arr })
+}
+
+#[pyfunction]
+fn extract(condition: &NdArray, a: &NdArray) -> PyResult<NdArray> {
+    let cond_flat: Vec<f64> = condition.data.iter().copied().collect();
+    let data_flat: Vec<f64> = a.data.iter().copied().collect();
+    
+    let min_len = cond_flat.len().min(data_flat.len());
+    let mut result = Vec::with_capacity(min_len);
+    
+    for i in 0..min_len {
+        if cond_flat[i] != 0.0 {
+            result.push(data_flat[i]);
+        }
+    }
+    
+    let arr = Array::from_shape_vec(IxDyn(&[result.len()]), result)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(NdArray { data: arr })
+}
+
 #[allow(unused)]
 fn compute_strides(shape: &[usize]) -> Vec<usize> {
     let mut strides = vec![1; shape.len()];
@@ -1961,7 +2454,7 @@ fn compute_strides(shape: &[usize]) -> Vec<usize> {
     strides
 }
 
-fn introselect(arr: &mut Vec<f64>, k: usize) -> f64 {
+fn introselect(arr: &mut [f64], k: usize) -> f64 {
     let n = arr.len();
     if n == 0 {
         return 0.0;
@@ -2049,7 +2542,7 @@ fn median(x: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
             }
             values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             let len = values.len();
-            let median_val = if len % 2 == 0 {
+            let median_val = if len.is_multiple_of(2) {
                 (values[len / 2 - 1] + values[len / 2]) / 2.0
             } else {
                 values[len / 2]
@@ -2065,41 +2558,39 @@ fn median(x: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
             let nrows = x.data.shape()[0];
             let ncols = x.data.shape()[1];
             
-            let result: Vec<f64>;
-            
-            if ax == 0 {
-                result = (0..ncols)
+            let result: Vec<f64> = if ax == 0 {
+                (0..ncols)
                     .map(|c| {
                         let mut values: Vec<f64> = (0..nrows)
                             .map(|r| x.data[[r, c]])
                             .collect();
                         values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                         let len = values.len();
-                        if len % 2 == 0 {
+                        if len.is_multiple_of(2) {
                             (values[len / 2 - 1] + values[len / 2]) / 2.0
                         } else {
                             values[len / 2]
                         }
                     })
-                    .collect();
+                    .collect()
             } else {
-                result = (0..nrows)
+                (0..nrows)
                     .map(|r| {
                         let mut values: Vec<f64> = (0..ncols)
                             .map(|c| x.data[[r, c]])
                             .collect();
                         values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                         let len = values.len();
-                        if len % 2 == 0 {
+                        if len.is_multiple_of(2) {
                             (values[len / 2 - 1] + values[len / 2]) / 2.0
                         } else {
                             values[len / 2]
                         }
                     })
-                    .collect();
-            }
+                    .collect()
+            };
             
-            let mut new_shape: Vec<usize> = x.data.shape().iter().copied().collect();
+            let mut new_shape: Vec<usize> = x.data.shape().to_vec();
             new_shape.remove(ax);
             let result_arr = Array::from_shape_vec(IxDyn(&new_shape), result)
                 .map_err(|e| PyValueError::new_err(e.to_string()))?;
@@ -2236,7 +2727,7 @@ fn average(a: &NdArray, axis: Option<isize>, weights: Option<&NdArray>, returned
 #[pyfunction]
 #[pyo3(signature = (x, q, axis=None, keepdims=false))]
 fn percentile(x: &NdArray, q: f64, axis: Option<isize>, keepdims: bool) -> PyResult<NdArray> {
-    if q < 0.0 || q > 100.0 {
+    if !(0.0..=100.0).contains(&q) {
         return Err(PyValueError::new_err("Percentile must be between 0 and 100"));
     }
 
@@ -2270,10 +2761,8 @@ fn percentile(x: &NdArray, q: f64, axis: Option<isize>, keepdims: bool) -> PyRes
             let nrows = x.data.shape()[0];
             let ncols = x.data.shape()[1];
             
-            let result: Vec<f64>;
-            
-            if ax == 0 {
-                result = (0..ncols)
+            let result: Vec<f64> = if ax == 0 {
+                (0..ncols)
                     .map(|c| {
                         let mut values: Vec<f64> = (0..nrows)
                             .map(|r| x.data[[r, c]])
@@ -2290,9 +2779,9 @@ fn percentile(x: &NdArray, q: f64, axis: Option<isize>, keepdims: bool) -> PyRes
                             values[lower] * (1.0 - frac) + values[upper] * frac
                         }
                     })
-                    .collect();
+                    .collect()
             } else {
-                result = (0..nrows)
+                (0..nrows)
                     .map(|r| {
                         let mut values: Vec<f64> = (0..ncols)
                             .map(|c| x.data[[r, c]])
@@ -2309,10 +2798,10 @@ fn percentile(x: &NdArray, q: f64, axis: Option<isize>, keepdims: bool) -> PyRes
                             values[lower] * (1.0 - frac) + values[upper] * frac
                         }
                     })
-                    .collect();
-            }
+                    .collect()
+            };
             
-            let mut new_shape: Vec<usize> = x.data.shape().iter().copied().collect();
+            let mut new_shape: Vec<usize> = x.data.shape().to_vec();
             if keepdims {
                 new_shape[ax] = 1;
             } else {
@@ -2332,7 +2821,7 @@ fn meshgrid<'py>(py: Python<'py>, args: &Bound<'_, PyTuple>, indexing: &str) -> 
     if n == 0 {
         return Err(PyValueError::new_err("Need at least one array"));
     }
-    let mut arrays: Vec<NdArray> = Vec::new();
+    let mut arrays: Vec<NdArray> = Vec::with_capacity(n);
     for item in args.iter() {
         let arr = item.extract::<NdArray>()?;
         if arr.data.ndim() != 1 {
@@ -2350,16 +2839,16 @@ fn meshgrid<'py>(py: Python<'py>, args: &Bound<'_, PyTuple>, indexing: &str) -> 
         }
         (true, out)
     };
-    let mut results: Vec<NdArray> = Vec::new();
-    for i in 0..n {
+    let mut results: Vec<NdArray> = Vec::with_capacity(n);
+    for (i, arr) in arrays.iter().enumerate() {
         let mut shape = vec![1usize; n];
         let actual_idx = if swap_first_two && n >= 2 {
             if i == 0 { 1 } else if i == 1 { 0 } else { i }
         } else {
             i
         };
-        shape[actual_idx] = arrays[i].data.len();
-        let reshaped = arrays[i].data.clone().into_shape_with_order(IxDyn(&shape))
+        shape[actual_idx] = arr.data.len();
+        let reshaped = arr.data.clone().into_shape_with_order(IxDyn(&shape))
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         let broadcast = reshaped.broadcast(IxDyn(&out_dims))
             .ok_or_else(|| PyValueError::new_err("Broadcasting failed"))?
@@ -2398,10 +2887,10 @@ fn histogram<'py>(py: Python<'py>, a: &NdArray, bins: usize, range: Option<&Boun
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         let edges_arr = Array::from_shape_vec(IxDyn(&[2]), vec![min_val, max_val])
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        return Ok(PyTuple::new(py, vec![
+        return PyTuple::new(py, vec![
             Bound::new(py, NdArray { data: hist_arr.into_dyn() })?.into_any(),
             Bound::new(py, NdArray { data: edges_arr.into_dyn() })?.into_any(),
-        ])?);
+        ]);
     }
     let mut hist = vec![0.0_f64; bins];
     let bin_edges: Vec<f64> = (0..=bins).map(|i| min_val + i as f64 * bin_width).collect();
@@ -2419,10 +2908,10 @@ fn histogram<'py>(py: Python<'py>, a: &NdArray, bins: usize, range: Option<&Boun
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
     let edges_arr = Array::from_shape_vec(IxDyn(&[bins + 1]), bin_edges)
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
-    Ok(PyTuple::new(py, vec![
+    PyTuple::new(py, vec![
         Bound::new(py, NdArray { data: hist_arr.into_dyn() })?.into_any(),
         Bound::new(py, NdArray { data: edges_arr.into_dyn() })?.into_any(),
-    ])?)
+    ])
 }
 
 #[pyfunction]
@@ -2555,7 +3044,7 @@ fn nonzero_arrs<'py>(py: Python<'py>, a: &NdArray) -> PyResult<Vec<Bound<'py, Py
 fn ix_rs<'py>(py: Python<'py>, args: &Bound<'_, PyTuple>) -> PyResult<Bound<'py, PyTuple>> {
     let n = args.len();
     if n == 0 {
-        return Ok(PyTuple::new(py, Vec::<Bound<'py, PyAny>>::new())?);
+        return PyTuple::new(py, Vec::<Bound<'py, PyAny>>::new());
     }
     let mut arrays: Vec<NdArray> = Vec::with_capacity(n);
     for i in 0..n {
@@ -2576,7 +3065,7 @@ fn ix_rs<'py>(py: Python<'py>, args: &Bound<'_, PyTuple>) -> PyResult<Bound<'py,
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         results.push(Bound::new(py, NdArray { data: reshaped.into_dyn() })?.into_any());
     }
-    Ok(PyTuple::new(py, results)?)
+    PyTuple::new(py, results)
 }
 
 /// 从 shape 直接创建 arange 数组元组（用于 fromfunction 等），避免 Python 层 list(range(d)) 循环
@@ -2591,7 +3080,7 @@ fn _arange_arrays<'py>(py: Python<'py>, shape: &Bound<'_, PyAny>) -> PyResult<Bo
         let nd = NdArray { data: arr.into_dyn() };
         arrays.push(Bound::new(py, nd)?.into_any());
     }
-    Ok(PyTuple::new(py, arrays)?)
+    PyTuple::new(py, arrays)
 }
 
 /// select 的 Rust 实现 — 单次遍历多条件选择，避免 Python 层 for 循环多次调用 where
@@ -2806,7 +3295,7 @@ fn argwhere(a: &NdArray) -> PyResult<NdArray> {
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         return Ok(NdArray { data: arr });
     }
-    let mut indices: Vec<Vec<usize>> = (0..ndim).map(|_| Vec::new()).collect();
+    let mut indices: Vec<Vec<usize>> = (0..ndim).map(|_| Vec::with_capacity(a.data.len())).collect();
     for (flat_idx, &val) in a.data.iter().enumerate() {
         if val != 0.0 {
             let mut remaining = flat_idx;
@@ -2820,8 +3309,8 @@ fn argwhere(a: &NdArray) -> PyResult<NdArray> {
     let num_nonzero = indices[0].len();
     let mut flat_result = Vec::with_capacity(num_nonzero * ndim);
     for i in 0..num_nonzero {
-        for d in 0..ndim {
-            flat_result.push(indices[d][i] as f64);
+        for row in indices.iter() {
+            flat_result.push(row[i] as f64);
         }
     }
     let arr = Array::from_shape_vec(IxDyn(&[num_nonzero, ndim]), flat_result)
@@ -2837,7 +3326,7 @@ fn count_nonzero(a: &NdArray) -> usize {
 #[pyfunction]
 fn vstack(arrays: &Bound<'_, PyAny>) -> PyResult<NdArray> {
     let list = arrays.cast::<PyList>()?;
-    let mut ndarrays: Vec<NdArray> = Vec::new();
+    let mut ndarrays: Vec<NdArray> = Vec::with_capacity(list.len());
     for item in list.iter() {
         ndarrays.push(item.extract::<NdArray>()?);
     }
@@ -2884,7 +3373,7 @@ fn vstack(arrays: &Bound<'_, PyAny>) -> PyResult<NdArray> {
 #[pyfunction]
 fn hstack(arrays: &Bound<'_, PyAny>) -> PyResult<NdArray> {
     let list = arrays.cast::<PyList>()?;
-    let mut ndarrays: Vec<NdArray> = Vec::new();
+    let mut ndarrays: Vec<NdArray> = Vec::with_capacity(list.len());
     for item in list.iter() {
         ndarrays.push(item.extract::<NdArray>()?);
     }
@@ -2933,6 +3422,41 @@ fn squeeze(a: &NdArray) -> PyResult<NdArray> {
 #[pyfunction]
 fn flatten(a: &NdArray) -> NdArray {
     a.flatten()
+}
+
+#[pyfunction]
+#[pyo3(signature = (a, order="C"))]
+fn flatten_full(a: &NdArray, order: &str) -> PyResult<NdArray> {
+    if order == "F" && a.data.ndim() > 1 {
+        let shape = a.data.shape().to_vec();
+        let ndim = shape.len();
+        let flat_c: Vec<f64> = a.data.iter().copied().collect();
+        
+        let mut strides = vec![1; ndim];
+        for i in (0..ndim - 1).rev() {
+            strides[i] = strides[i + 1] * shape[i + 1];
+        }
+        
+        let mut flat_f = Vec::with_capacity(flat_c.len());
+        
+        fn walk_f(order: usize, pos: usize, shape: &[usize], strides: &[usize], flat_c: &[f64], flat_f: &mut Vec<f64>) {
+            if order == 0 {
+                flat_f.push(flat_c[pos]);
+            } else {
+                for v in 0..shape[order - 1] {
+                    walk_f(order - 1, pos + v * strides[order - 1], shape, strides, flat_c, flat_f);
+                }
+            }
+        }
+        
+        walk_f(ndim, 0, &shape, &strides, &flat_c, &mut flat_f);
+        
+        let arr = Array::from_shape_vec(IxDyn(&[flat_f.len()]), flat_f)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(NdArray { data: arr })
+    } else {
+        Ok(a.flatten())
+    }
 }
 
 #[pyfunction]
@@ -2991,9 +3515,9 @@ fn heaviside(x: &NdArray, h0: f64) -> NdArray {
 }
 
 #[pyfunction]
-fn logspace(start: f64, stop: f64, num: usize) -> PyResult<NdArray> {
-    linspace(start, stop, num, false).map(|nd| {
-        NdArray { data: nd.data.mapv(|v| 10.0_f64.powf(v)) }
+fn logspace(start: f64, stop: f64, num: usize, base: f64) -> PyResult<NdArray> {
+    linspace(start, stop, num, true).map(|nd| {
+        NdArray { data: nd.data.mapv(|v| base.powf(v)) }
     })
 }
 
@@ -3134,7 +3658,7 @@ fn expand_dims(a: &NdArray, axis: isize) -> PyResult<NdArray> {
 #[pyfunction]
 fn column_stack(arrays: &Bound<'_, PyAny>) -> PyResult<NdArray> {
     let list = arrays.cast::<PyList>()?;
-    let mut ndarrays: Vec<NdArray> = Vec::new();
+    let mut ndarrays: Vec<NdArray> = Vec::with_capacity(list.len());
     for item in list.iter() {
         ndarrays.push(item.extract::<NdArray>()?);
     }
@@ -3333,9 +3857,7 @@ fn flip(a: &NdArray, axis: Option<isize>) -> PyResult<NdArray> {
                 for i in 0..axis_size {
                     let src = p * axis_size * post + i * post;
                     let dst = p * axis_size * post + (axis_size - 1 - i) * post;
-                    for k in 0..post {
-                        result[dst + k] = data_vec[src + k];
-                    }
+                    result[dst..dst + post].copy_from_slice(&data_vec[src..src + post]);
                 }
             }
             let arr = Array::from_shape_vec(IxDyn(&shape), result)
@@ -3377,7 +3899,7 @@ fn split_rs(a: &NdArray, indices_or_sections: &Bound<'_, PyAny>, axis: isize) ->
     let post: usize = shape.iter().skip(ax + 1).product();
     let data_vec: Vec<f64> = a.data.iter().copied().collect();
 
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(split_points.len() - 1);
     for i in 0..split_points.len() - 1 {
         let start = split_points[i].min(axis_size);
         let end = split_points[i + 1].min(axis_size);
@@ -3401,9 +3923,7 @@ fn split_rs(a: &NdArray, indices_or_sections: &Bound<'_, PyAny>, axis: isize) ->
             for s in 0..section_size {
                 let src = p * axis_size * post + (start + s) * post;
                 let dst = p * section_size * post + s * post;
-                for k in 0..post {
-                    section_data[dst + k] = data_vec[src + k];
-                }
+                section_data[dst..dst + post].copy_from_slice(&data_vec[src..src + post]);
             }
         }
         let arr = Array::from_shape_vec(IxDyn(&new_shape), section_data)
@@ -3443,13 +3963,13 @@ fn cov(a: &NdArray, rowvar: bool) -> PyResult<NdArray> {
 
     let mut cov_matrix = vec![vec![0.0; n_vars]; n_vars];
     let factor = 1.0 / (n_obs as f64 - 1.0);
-    for i in 0..n_vars {
+    for k in 0..n_vars {
         for j in 0..n_vars {
             let mut s = 0.0;
-            for k in 0..n_obs {
-                s += centered[i][k] * centered[j][k];
+            for (ci, cj) in centered[k].iter().zip(centered[j].iter()) {
+                s += ci * cj;
             }
-            cov_matrix[i][j] = s * factor;
+            cov_matrix[k][j] = s * factor;
         }
     }
 
@@ -3465,9 +3985,12 @@ fn cov(a: &NdArray, rowvar: bool) -> PyResult<NdArray> {
 }
 
 // ========== 2D 直方图 ==========
+/// 2D 直方图返回类型：主数组 + 两个边缘数组
+type Histogram2DResult = (NdArray, (Vec<f64>, Vec<f64>));
+
 #[pyfunction]
 #[pyo3(signature = (x, y, bins=10))]
-fn histogram2d_rs(x: &NdArray, y: &NdArray, bins: usize) -> PyResult<(NdArray, (Vec<f64>, Vec<f64>))> {
+fn histogram2d_rs(x: &NdArray, y: &NdArray, bins: usize) -> PyResult<Histogram2DResult> {
     let x_vals: Vec<f64> = x.data.iter().copied().collect();
     let y_vals: Vec<f64> = y.data.iter().copied().collect();
     let n = x_vals.len().min(y_vals.len());
@@ -3555,9 +4078,9 @@ fn polyder_rs(coef: &NdArray, m: usize) -> PyResult<NdArray> {
     let mut c: Vec<f64> = coef.data.iter().copied().collect();
     for _ in 0..m {
         let deg = c.len() - 1;
-        let mut new_c = Vec::new();
-        for i in 0..c.len() - 1 {
-            new_c.push(c[i] * (deg - i) as f64);
+        let mut new_c = Vec::with_capacity(c.len() - 1);
+        for (i, ci) in c.iter().enumerate().take(c.len() - 1) {
+            new_c.push(ci * (deg - i) as f64);
         }
         if new_c.is_empty() {
             new_c.push(0.0);
@@ -3576,9 +4099,9 @@ fn polyint_rs(coef: &NdArray, m: usize, k: f64) -> PyResult<NdArray> {
     let mut c: Vec<f64> = coef.data.iter().copied().collect();
     for _ in 0..m {
         let deg = c.len() - 1;
-        let mut new_c = Vec::new();
-        for i in 0..c.len() {
-            new_c.push(c[i] / (deg - i + 1) as f64);
+        let mut new_c = Vec::with_capacity(c.len() + 1);
+        for (i, ci) in c.iter().enumerate() {
+            new_c.push(ci / (deg - i + 1) as f64);
         }
         new_c.push(k);
         c = new_c;
@@ -3691,9 +4214,9 @@ fn polyfit_rs(x: &NdArray, y: &NdArray, deg: usize) -> PyResult<NdArray> {
     let m = deg + 1;
 
     let mut vander = vec![vec![0.0; m]; n];
-    for i in 0..n {
-        for j in 0..m {
-            vander[i][j] = x_vals[i].powi((deg - j) as i32);
+    for (i, xv) in x_vals.iter().enumerate() {
+        for (j, vand_row) in vander[i].iter_mut().enumerate() {
+            *vand_row = xv.powi((deg - j) as i32);
         }
     }
 
@@ -3701,8 +4224,8 @@ fn polyfit_rs(x: &NdArray, y: &NdArray, deg: usize) -> PyResult<NdArray> {
     for i in 0..m {
         for j in 0..m {
             let mut s = 0.0;
-            for k in 0..n {
-                s += vander[k][i] * vander[k][j];
+            for vand_row in vander.iter() {
+                s += vand_row[i] * vand_row[j];
             }
             ata[i][j] = s;
         }
@@ -3711,8 +4234,8 @@ fn polyfit_rs(x: &NdArray, y: &NdArray, deg: usize) -> PyResult<NdArray> {
     let mut aty = vec![0.0; m];
     for i in 0..m {
         let mut s = 0.0;
-        for k in 0..n {
-            s += vander[k][i] * y_vals[k];
+        for (vand_row, yv) in vander.iter().zip(y_vals.iter()) {
+            s += vand_row[i] * yv;
         }
         aty[i] = s;
     }
@@ -3745,6 +4268,7 @@ fn polyfit_rs(x: &NdArray, y: &NdArray, deg: usize) -> PyResult<NdArray> {
         for row in 0..m {
             if row != col && aug[row][col] != 0.0 {
                 let factor = aug[row][col] / pivot;
+                #[allow(clippy::needless_range_loop)]
                 for jj in col..m + 1 {
                     aug[row][jj] -= factor * aug[col][jj];
                 }
@@ -3789,7 +4313,7 @@ fn save_npy(filename: &str, a: &NdArray) -> PyResult<()> {
     let shape_str: Vec<String> = shape.iter().map(|s| s.to_string()).collect();
     let header = format!("{{'descr': '<f8', 'fortran_order': False, 'shape': ({}), }}", shape_str.join(", "));
     let header_len = header.len();
-    let padded_len = ((header_len + 10 + 63) / 64) * 64 - 10;
+    let padded_len = (header_len + 10).div_ceil(64) * 64 - 10;
     let padded_header = format!("{:width$}", header, width = padded_len);
 
     file.write_all(&(padded_len as u16).to_le_bytes())
@@ -3869,20 +4393,10 @@ fn load_npy(filename: &str) -> PyResult<NdArray> {
 }
 
 fn format_value(fmt: &str, v: f64) -> String {
-    if fmt.contains("%d") {
-        format!("{}", v as i64)
-    } else if fmt.contains("%i") {
-        format!("{}", v as i64)
-    } else if fmt.contains("%f") {
-        format!("{}", v)
-    } else if fmt.contains("%e") || fmt.contains("%E") {
-        format!("{}", v)
-    } else if fmt.contains("%g") || fmt.contains("%G") {
-        format!("{}", v)
-    } else if fmt.contains("%s") {
-        format!("{}", v)
+    if fmt.contains("%d") || fmt.contains("%i") {
+        (v as i64).to_string()
     } else {
-        format!("{}", v)
+        v.to_string()
     }
 }
 
@@ -3933,7 +4447,7 @@ fn load_text(filename: &str, delimiter: Option<&str>, skiprows: usize) -> PyResu
         .map_err(|e| PyValueError::new_err(format!("Failed to open file: {}", e)))?;
     let reader = BufReader::new(file);
 
-    let mut rows: Vec<Vec<f64>> = Vec::new();
+    let mut rows: Vec<Vec<f64>> = Vec::with_capacity(1000);
     for (idx, line) in reader.lines().enumerate() {
         if idx < skiprows {
             continue;
@@ -4004,7 +4518,7 @@ fn bytes_to_floats(bytes: &[u8], count: isize) -> PyResult<NdArray> {
 fn tuple_getitem(a: &NdArray, ranges: &Bound<'_, PyAny>) -> PyResult<NdArray> {
     // ranges: list of (start, end, step) tuples
     let list = ranges.cast::<PyList>()?;
-    let mut ranges_vec: Vec<(i64, i64, i64)> = Vec::new();
+    let mut ranges_vec: Vec<(i64, i64, i64)> = Vec::with_capacity(list.len());
     for item in list.iter() {
         let triple = item.extract::<(i64, i64, i64)>()?;
         ranges_vec.push(triple);
@@ -4019,10 +4533,8 @@ fn tuple_getitem(a: &NdArray, ranges: &Bound<'_, PyAny>) -> PyResult<NdArray> {
 
     // 计算每个维度的输出大小
     let mut out_shape: Vec<usize> = Vec::with_capacity(ndim);
-    for i in 0..ndim {
-        let s = ranges_vec[i].0;
-        let e = ranges_vec[i].1;
-        let st = ranges_vec[i].2.max(1);
+    for &(s, e, st) in ranges_vec.iter() {
+        let st = st.max(1);
         if e <= s {
             out_shape.push(0);
         } else {
@@ -4100,7 +4612,7 @@ fn savez_npz(filename: &str, arrays: &Bound<'_, PyAny>, names: &Bound<'_, PyAny>
     let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default()
         .compression_method(zip::CompressionMethod::Stored);
 
-    for (_i, (item, name_item)) in arr_list.iter().zip(name_list.iter()).enumerate() {
+    for (item, name_item) in arr_list.iter().zip(name_list.iter()) {
         let nd = item.extract::<NdArray>()?;
         let name_str = name_item.extract::<String>()?;
         let entry_name = if name_str.ends_with(".npy") {
@@ -4110,16 +4622,16 @@ fn savez_npz(filename: &str, arrays: &Bound<'_, PyAny>, names: &Bound<'_, PyAny>
         };
 
         // 序列化 ndarray 为 .npy 格式
-        let mut buf: Vec<u8> = Vec::new();
-        buf.extend_from_slice(b"\x93NUMPY");
-        buf.push(1);
-        buf.push(0);
-
         let shape = nd.data.shape().to_vec();
         let shape_str: Vec<String> = shape.iter().map(|s| s.to_string()).collect();
         let header = format!("{{'descr': '<f8', 'fortran_order': False, 'shape': ({}), }}", shape_str.join(", "));
         let header_len = header.len();
-        let padded_len = ((header_len + 10 + 63) / 64) * 64 - 10;
+        let padded_len = (header_len + 10).div_ceil(64) * 64 - 10;
+        let data_size: usize = nd.data.len();
+        let mut buf: Vec<u8> = Vec::with_capacity(10 + padded_len + data_size * 8);
+        buf.extend_from_slice(b"\x93NUMPY");
+        buf.push(1);
+        buf.push(0);
         let padded_header = format!("{:width$}", header, width = padded_len);
 
         let header_len_u16 = padded_len as u16;
@@ -4152,7 +4664,7 @@ fn load_npz(filename: &str) -> PyResult<Vec<(String, NdArray)>> {
     let mut zip = zip::ZipArchive::new(file)
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
-    let mut results: Vec<(String, NdArray)> = Vec::new();
+    let mut results: Vec<(String, NdArray)> = Vec::with_capacity(zip.len());
 
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i)
@@ -4163,7 +4675,7 @@ fn load_npz(filename: &str) -> PyResult<Vec<(String, NdArray)>> {
         }
         let key = name.trim_end_matches(".npy").to_string();
 
-        let mut contents = Vec::new();
+        let mut contents = Vec::with_capacity(entry.size() as usize);
         entry.read_to_end(&mut contents)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
@@ -4393,7 +4905,7 @@ fn format_complex_array_inner(arr: &Array<f64, IxDyn>, pad_width: usize) -> Stri
         let mut s = String::from("[");
         for (i, val) in arr.iter().enumerate() {
             if i > 0 {
-                s.push_str(" ");
+                s.push(' ');
             }
             let val_str = format_complex_scalar(*val);
             if pad_width > 0 {
@@ -4415,7 +4927,7 @@ fn format_complex_array_inner(arr: &Array<f64, IxDyn>, pad_width: usize) -> Stri
         let row_str = format_complex_array_inner(&sub, pad_width);
         s.push_str(&row_str);
     }
-    s.push_str("]");
+    s.push(']');
     s
 }
 
@@ -4459,11 +4971,11 @@ fn format_int_array_inner(arr: &Array<f64, IxDyn>, pad_width: usize) -> String {
         let mut s = String::from("[");
         for (i, val) in arr.iter().enumerate() {
             if i > 0 {
-                s.push_str(" ");
+                s.push(' ');
             }
             let val_str = format_int_scalar(*val);
             if pad_width > 0 {
-                s.push_str(&format!("{:>width$}", val_str, width = pad_width));
+                let _ = write!(s, "{:>pad_width$}", val_str);
             } else {
                 s.push_str(&val_str);
             }
@@ -4481,7 +4993,7 @@ fn format_int_array_inner(arr: &Array<f64, IxDyn>, pad_width: usize) -> String {
         let row_str = format_int_array_inner(&sub, pad_width);
         s.push_str(&row_str);
     }
-    s.push_str("]");
+    s.push(']');
     s
 }
 
@@ -4500,12 +5012,29 @@ fn format_int_array(arr: &Array<f64, IxDyn>) -> String {
 #[pyfunction]
 fn _format_int_repr(arr: &NdArray) -> String {
     let inner = format_int_array(&arr.data);
-    format!("rsnumpy.ndarray({}) dtype=int64", inner)
+    format!("rsnumpy.ndarray({inner}) dtype=int64")
 }
 
 #[pyfunction]
 fn _format_int_str(arr: &NdArray) -> String {
     format_int_array(&arr.data)
+}
+
+#[pyfunction]
+fn binary_repr(num: i64, width: Option<usize>) -> String {
+    let w = if let Some(w) = width {
+        w
+    } else {
+        let bits = 64 - num.abs().leading_zeros();
+        if bits == 0 { 1 } else { bits as usize }
+    };
+    
+    if num >= 0 {
+        format!("{num:0w$b}")
+    } else {
+        let val = (1 << w) + num;
+        format!("{val:0w$b}")
+    }
 }
 
 // ===== Float64 Formatting (always show decimal point for integer values) =====
@@ -4525,11 +5054,11 @@ fn format_float_array_inner(arr: &Array<f64, IxDyn>, pad_width: usize) -> String
         let mut s = String::from("[");
         for (i, val) in arr.iter().enumerate() {
             if i > 0 {
-                s.push_str(" ");
+                s.push(' ');
             }
             let val_str = format_float_scalar(*val);
             if pad_width > 0 {
-                s.push_str(&format!("{:>width$}", val_str, width = pad_width));
+                let _ = write!(s, "{:>pad_width$}", val_str);
             } else {
                 s.push_str(&val_str);
             }
@@ -4547,7 +5076,7 @@ fn format_float_array_inner(arr: &Array<f64, IxDyn>, pad_width: usize) -> String
         let row_str = format_float_array_inner(&sub, pad_width);
         s.push_str(&row_str);
     }
-    s.push_str("]");
+    s.push(']');
     s
 }
 
@@ -4563,7 +5092,7 @@ fn format_float_array(arr: &Array<f64, IxDyn>) -> String {
 #[pyfunction]
 fn _format_float_repr(arr: &NdArray) -> String {
     let inner = format_float_array(&arr.data);
-    format!("rsnumpy.ndarray({}) dtype=float64", inner)
+    format!("rsnumpy.ndarray({inner}) dtype=float64")
 }
 
 #[pyfunction]
@@ -4571,11 +5100,10 @@ fn _format_float_str(arr: &NdArray) -> String {
     format_float_array(&arr.data)
 }
 
-// int64 值显示：使用 format_scalar（整数值不显示小数点，如 0 1 2）
 #[pyfunction]
 fn _format_int_val_repr(arr: &NdArray) -> String {
     let inner = format_array_repr(&arr.data, "");
-    format!("rsnumpy.ndarray({}) dtype=int64", inner)
+    format!("rsnumpy.ndarray({inner}) dtype=int64")
 }
 
 #[pyfunction]
@@ -4583,13 +5111,7 @@ fn _format_int_val_str(arr: &NdArray) -> String {
     format_array_repr(&arr.data, "")
 }
 
-// ===== Module Initialization =====
-
-#[pymodule]
-fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<NdArray>()?;
-    m.add_class::<NdArrayIter>()?;
-
+fn init_array_creation(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(array, m)?)?;
     m.add_function(wrap_pyfunction!(zeros, m)?)?;
     m.add_function(wrap_pyfunction!(ones, m)?)?;
@@ -4598,7 +5120,14 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(linspace, m)?)?;
     m.add_function(wrap_pyfunction!(full, m)?)?;
     m.add_function(wrap_pyfunction!(empty, m)?)?;
+    m.add_function(wrap_pyfunction!(zeros_like, m)?)?;
+    m.add_function(wrap_pyfunction!(ones_like, m)?)?;
+    m.add_function(wrap_pyfunction!(empty_like, m)?)?;
+    m.add_function(wrap_pyfunction!(full_like, m)?)?;
+    Ok(())
+}
 
+fn init_math_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sin, m)?)?;
     m.add_function(wrap_pyfunction!(cos, m)?)?;
     m.add_function(wrap_pyfunction!(tan, m)?)?;
@@ -4634,7 +5163,10 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(hypot, m)?)?;
     m.add_function(wrap_pyfunction!(sinc, m)?)?;
     m.add_function(wrap_pyfunction!(heaviside, m)?)?;
+    Ok(())
+}
 
+fn init_statistics_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sum, m)?)?;
     m.add_function(wrap_pyfunction!(mean, m)?)?;
     m.add_function(wrap_pyfunction!(std_dev, m)?)?;
@@ -4643,18 +5175,39 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(max, m)?)?;
     m.add_function(wrap_pyfunction!(argmin, m)?)?;
     m.add_function(wrap_pyfunction!(argmax, m)?)?;
+    Ok(())
+}
 
+fn init_array_manipulation(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(concatenate, m)?)?;
     m.add_function(wrap_pyfunction!(stack, m)?)?;
     m.add_function(wrap_pyfunction!(transpose, m)?)?;
     m.add_function(wrap_pyfunction!(swapaxes, m)?)?;
+    m.add_function(wrap_pyfunction!(vstack, m)?)?;
+    m.add_function(wrap_pyfunction!(hstack, m)?)?;
+    m.add_function(wrap_pyfunction!(tile, m)?)?;
+    m.add_function(wrap_pyfunction!(squeeze, m)?)?;
+    m.add_function(wrap_pyfunction!(flatten, m)?)?;
+    m.add_function(wrap_pyfunction!(flatten_full, m)?)?;
+    m.add_function(wrap_pyfunction!(reshape, m)?)?;
+    Ok(())
+}
 
+fn init_misc_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(where_, m)?)?;
     m.add_function(wrap_pyfunction!(clip, m)?)?;
     m.add_function(wrap_pyfunction!(unique, m)?)?;
+    m.add_function(wrap_pyfunction!(unique_full, m)?)?;
+    m.add_function(wrap_pyfunction!(resize_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(delete_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(insert_rs, m)?)?;
     m.add_function(wrap_pyfunction!(sort, m)?)?;
     m.add_function(wrap_pyfunction!(argsort, m)?)?;
     m.add_function(wrap_pyfunction!(partition, m)?)?;
+    m.add_function(wrap_pyfunction!(argpartition, m)?)?;
+    m.add_function(wrap_pyfunction!(lexsort, m)?)?;
+    m.add_function(wrap_pyfunction!(sort_complex, m)?)?;
+    m.add_function(wrap_pyfunction!(extract, m)?)?;
     m.add_function(wrap_pyfunction!(median, m)?)?;
     m.add_function(wrap_pyfunction!(average, m)?)?;
     m.add_function(wrap_pyfunction!(percentile, m)?)?;
@@ -4671,7 +5224,24 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(select_rs, m)?)?;
     m.add_function(wrap_pyfunction!(ix_rs, m)?)?;
     m.add_function(wrap_pyfunction!(_arange_arrays, m)?)?;
+    m.add_function(wrap_pyfunction!(expand_dims, m)?)?;
+    m.add_function(wrap_pyfunction!(column_stack, m)?)?;
+    m.add_function(wrap_pyfunction!(roll, m)?)?;
+    m.add_function(wrap_pyfunction!(rot90, m)?)?;
+    m.add_function(wrap_pyfunction!(flatnonzero, m)?)?;
+    m.add_function(wrap_pyfunction!(ptp, m)?)?;
+    m.add_function(wrap_pyfunction!(digitize, m)?)?;
+    m.add_function(wrap_pyfunction!(broadcast_to, m)?)?;
+    m.add_function(wrap_pyfunction!(searchsorted, m)?)?;
+    m.add_function(wrap_pyfunction!(flip, m)?)?;
+    m.add_function(wrap_pyfunction!(split_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(cov, m)?)?;
+    m.add_function(wrap_pyfunction!(histogram2d_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(corrcoef_rs, m)?)?;
+    Ok(())
+}
 
+fn init_bitwise_and_comparison(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(isnan, m)?)?;
     m.add_function(wrap_pyfunction!(isinf, m)?)?;
     m.add_function(wrap_pyfunction!(isfinite, m)?)?;
@@ -4688,14 +5258,10 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(array_equal, m)?)?;
     m.add_function(wrap_pyfunction!(argwhere, m)?)?;
     m.add_function(wrap_pyfunction!(count_nonzero, m)?)?;
+    Ok(())
+}
 
-    m.add_function(wrap_pyfunction!(vstack, m)?)?;
-    m.add_function(wrap_pyfunction!(hstack, m)?)?;
-    m.add_function(wrap_pyfunction!(tile, m)?)?;
-    m.add_function(wrap_pyfunction!(squeeze, m)?)?;
-    m.add_function(wrap_pyfunction!(flatten, m)?)?;
-    m.add_function(wrap_pyfunction!(reshape, m)?)?;
-
+fn init_arithmetic_operations(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(logspace, m)?)?;
     m.add_function(wrap_pyfunction!(geomspace, m)?)?;
     m.add_function(wrap_pyfunction!(add, m)?)?;
@@ -4714,64 +5280,71 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(logical_or, m)?)?;
     m.add_function(wrap_pyfunction!(logical_xor, m)?)?;
     m.add_function(wrap_pyfunction!(isclose, m)?)?;
-    m.add_function(wrap_pyfunction!(expand_dims, m)?)?;
-    m.add_function(wrap_pyfunction!(column_stack, m)?)?;
-    m.add_function(wrap_pyfunction!(roll, m)?)?;
-    m.add_function(wrap_pyfunction!(rot90, m)?)?;
-    m.add_function(wrap_pyfunction!(flatnonzero, m)?)?;
-    m.add_function(wrap_pyfunction!(ptp, m)?)?;
-    m.add_function(wrap_pyfunction!(digitize, m)?)?;
-    m.add_function(wrap_pyfunction!(broadcast_to, m)?)?;
-    m.add_function(wrap_pyfunction!(searchsorted, m)?)?;
-    m.add_function(wrap_pyfunction!(flip, m)?)?;
-    m.add_function(wrap_pyfunction!(split_rs, m)?)?;
-    m.add_function(wrap_pyfunction!(cov, m)?)?;
-    m.add_function(wrap_pyfunction!(histogram2d_rs, m)?)?;
-    m.add_function(wrap_pyfunction!(corrcoef_rs, m)?)?;
-    m.add_function(wrap_pyfunction!(polyval_rs, m)?)?;
-    m.add_function(wrap_pyfunction!(polyder_rs, m)?)?;
-    m.add_function(wrap_pyfunction!(polyint_rs, m)?)?;
-    m.add_function(wrap_pyfunction!(polyroots_rs, m)?)?;
-    m.add_function(wrap_pyfunction!(polyfit_rs, m)?)?;
+    Ok(())
+}
+
+fn init_io_and_poly(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(save_npy, m)?)?;
     m.add_function(wrap_pyfunction!(load_npy, m)?)?;
     m.add_function(wrap_pyfunction!(save_text, m)?)?;
     m.add_function(wrap_pyfunction!(load_text, m)?)?;
     m.add_function(wrap_pyfunction!(bytes_to_floats, m)?)?;
+    m.add_function(wrap_pyfunction!(savez_npz, m)?)?;
+    m.add_function(wrap_pyfunction!(load_npz, m)?)?;
+    m.add_function(wrap_pyfunction!(polyval_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(polyder_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(polyint_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(polyroots_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(polyfit_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(polyadd, m)?)?;
+    m.add_function(wrap_pyfunction!(polysub, m)?)?;
+    m.add_function(wrap_pyfunction!(polymul, m)?)?;
+    Ok(())
+}
 
+fn init_indexing_and_format(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(tuple_getitem, m)?)?;
     m.add_function(wrap_pyfunction!(indexing::getitem_multi, m)?)?;
     m.add_function(wrap_pyfunction!(indexing::getitem_scalar, m)?)?;
     m.add_function(wrap_pyfunction!(indexing::setitem_multi, m)?)?;
     m.add_function(wrap_pyfunction!(indexing::iscomplex_cpx, m)?)?;
-    m.add_function(wrap_pyfunction!(savez_npz, m)?)?;
-    m.add_function(wrap_pyfunction!(load_npz, m)?)?;
-    m.add_function(wrap_pyfunction!(polyadd, m)?)?;
-    m.add_function(wrap_pyfunction!(polysub, m)?)?;
-    m.add_function(wrap_pyfunction!(polymul, m)?)?;
     m.add_function(wrap_pyfunction!(argmax_axis, m)?)?;
     m.add_function(wrap_pyfunction!(argmin_axis, m)?)?;
-
+    m.add_function(wrap_pyfunction!(binary_repr, m)?)?;
     m.add_function(wrap_pyfunction!(_format_complex_repr, m)?)?;
     m.add_function(wrap_pyfunction!(_format_complex_str, m)?)?;
-
     m.add_function(wrap_pyfunction!(_format_int_repr, m)?)?;
     m.add_function(wrap_pyfunction!(_format_int_str, m)?)?;
-
     m.add_function(wrap_pyfunction!(_format_float_repr, m)?)?;
     m.add_function(wrap_pyfunction!(_format_float_str, m)?)?;
-
     m.add_function(wrap_pyfunction!(_format_int_val_repr, m)?)?;
     m.add_function(wrap_pyfunction!(_format_int_val_str, m)?)?;
+    Ok(())
+}
 
-    m.add_function(wrap_pyfunction!(fft::py_fft, m)?)?;
-    m.add_function(wrap_pyfunction!(fft::py_ifft, m)?)?;
-    m.add_function(wrap_pyfunction!(fft::py_rfft, m)?)?;
-    m.add_function(wrap_pyfunction!(fft::py_irfft, m)?)?;
+fn init_fft(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fft::py_fft_ndarray, m)?)?;
     m.add_function(wrap_pyfunction!(fft::py_ifft_ndarray, m)?)?;
     m.add_function(wrap_pyfunction!(fft::py_rfft_ndarray, m)?)?;
     m.add_function(wrap_pyfunction!(fft::py_irfft_ndarray, m)?)?;
+    Ok(())
+}
+
+#[pymodule]
+fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<NdArray>()?;
+    m.add_class::<NdArrayIter>()?;
+
+    init_array_creation(m)?;
+    init_math_functions(m)?;
+    init_statistics_functions(m)?;
+    init_array_manipulation(m)?;
+    init_misc_functions(m)?;
+    init_bitwise_and_comparison(m)?;
+    init_arithmetic_operations(m)?;
+    init_io_and_poly(m)?;
+    init_indexing_and_format(m)?;
+    init_fft(m)?;
 
     let random_module = PyModule::new(m.py(), "random")?;
     random::init_module(&random_module)?;

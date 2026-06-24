@@ -2,7 +2,6 @@
 
 **A Rust-powered NumPy-compatible array library.**
 
-![Build Status](https://github.com/your-username/rsnumpy/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python Version](https://img.shields.io/badge/python-%3E%3D%203.10-blue.svg)
 ![Rust Version](https://img.shields.io/badge/rust-%3E%3D%201.75-orange.svg)

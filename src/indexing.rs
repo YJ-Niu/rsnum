@@ -1,55 +1,44 @@
-use ndarray::{Array, IxDyn};
+use ndarray::{Array, IxDyn, Slice};
 use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PySlice, PyTuple};
+use rayon::prelude::*;
 
 use crate::{NdArray, parse_py_list_to_flat};
 
-/// 索引描述符：每个维度上的索引方式
 #[derive(Clone)]
 enum IndexDesc {
-    /// 切片 (start, stop, step)，已处理负索引
     Slice(isize, isize, isize),
-    /// 整数索引，已处理负索引
     Int(usize),
-    /// 花式索引（整数列表）
     Fancy(Vec<usize>),
-    /// 花式索引来自 ndim>1 的 ndarray（ix_ 风格 → 笛卡尔积）
     FancyMulti(Vec<usize>),
 }
 
-/// 解析 Python 索引对象，返回 IndexDesc
 fn parse_single_index(item: &Bound<'_, PyAny>, dim_size: isize) -> PyResult<IndexDesc> {
-    // 先尝试解析为整数（必须在 ndarray 之前，否则 from_py_object 会拦截）
     if let Ok(idx) = item.extract::<isize>() {
         let actual_idx = if idx < 0 { (dim_size + idx) as usize } else { idx as usize };
         return Ok(IndexDesc::Int(actual_idx));
     }
 
-    // 尝试解析为 Python 列表（布尔列表优先于 NdArray 构造）
     if let Ok(list) = item.cast::<PyList>() {
         if list.is_empty() {
             return Ok(IndexDesc::Fancy(vec![]));
         }
-        // 检查是否为布尔列表（严格类型检查，而非 truthiness）
-        let mut is_bool = true;
-        for e in list.iter() {
-            if e.get_type().name().map(|n| n != "bool").unwrap_or(true) {
-                is_bool = false;
-                break;
-            }
-        }
+        
+        let is_bool = list.iter().all(|e| {
+            e.get_type().name().map(|n| n == "bool").unwrap_or(false)
+        });
+        
         if is_bool {
-            let mut fancy: Vec<usize> = Vec::new();
-            for (j, e) in list.iter().enumerate() {
-                if e.extract::<bool>().unwrap_or(false) {
-                    fancy.push(j);
-                }
-            }
+            let fancy: Vec<usize> = list.iter()
+                .enumerate()
+                .filter(|(_, e)| e.extract::<bool>().unwrap_or(false))
+                .map(|(j, _)| j)
+                .collect();
             return Ok(IndexDesc::Fancy(fancy));
         }
-        // 尝试整数列表
-        let mut fancy: Vec<usize> = Vec::new();
+        
+        let mut fancy: Vec<usize> = Vec::with_capacity(list.len());
         let mut all_int = true;
         for e in list.iter() {
             if let Ok(v) = e.extract::<isize>() {
@@ -63,7 +52,7 @@ fn parse_single_index(item: &Bound<'_, PyAny>, dim_size: isize) -> PyResult<Inde
         if all_int {
             return Ok(IndexDesc::Fancy(fancy));
         }
-        // 非标量列表（嵌套结构）→ 尝试构造 NdArray（保留多维形状）
+        
         let (values, shape) = parse_py_list_to_flat(item)?;
         let nd_shape = if shape.is_empty() { IxDyn(&[]) } else { IxDyn(&shape) };
         let arr = Array::from_shape_vec(nd_shape, values)
@@ -71,12 +60,10 @@ fn parse_single_index(item: &Bound<'_, PyAny>, dim_size: isize) -> PyResult<Inde
         return Ok(ndarray_to_index_desc(&NdArray { data: arr }, dim_size));
     }
 
-    // 尝试解析为 ndarray
     if let Ok(arr) = item.extract::<NdArray>() {
         return Ok(ndarray_to_index_desc(&arr, dim_size));
     }
 
-    // 尝试解析为 slice
     if let Ok(slice_obj) = item.cast::<PySlice>() {
         let start = slice_obj
             .getattr("start")?
@@ -97,14 +84,12 @@ fn parse_single_index(item: &Bound<'_, PyAny>, dim_size: isize) -> PyResult<Inde
         return Ok(IndexDesc::Slice(actual_start, actual_stop, step));
     }
 
-    // 以上都不匹配
     Err(PyTypeError::new_err(format!(
         "Unsupported index type: {}",
         item.get_type().name()?
     )))
 }
 
-/// 从 NdArray 提取索引描述符
 fn ndarray_to_index_desc(arr: &NdArray, dim_size: isize) -> IndexDesc {
     let vals: Vec<f64> = arr.data.iter().copied().collect();
     let fancy: Vec<usize> = vals.iter().map(|&v| {
@@ -118,67 +103,44 @@ fn ndarray_to_index_desc(arr: &NdArray, dim_size: isize) -> IndexDesc {
     }
 }
 
-/// 展开 Ellipsis 并解析索引元组，返回 IndexDesc 列表
-///
-/// Python 侧已展开 Ellipsis 为切片再调用此函数
-/// 此函数只处理元组索引的解析
-fn parse_indices(
-    key: &Bound<'_, PyAny>,
-    shape: &[usize],
-) -> PyResult<Vec<IndexDesc>> {
+fn parse_indices(key: &Bound<'_, PyAny>, shape: &[usize]) -> PyResult<Vec<IndexDesc>> {
     let key_tuple = key.cast::<PyTuple>()?;
 
-    // Python 侧已经展开了 Ellipsis，这里直接解析
-    let mut indices: Vec<IndexDesc> = Vec::new();
-    for (i, item) in key_tuple.iter().enumerate() {
-        let dim_size = shape.get(i).copied().unwrap_or(0) as isize;
-        indices.push(parse_single_index(&item, dim_size)?);
-    }
+    let indices: Vec<IndexDesc> = key_tuple.iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let dim_size = shape.get(i).copied().unwrap_or(0) as isize;
+            parse_single_index(&item, dim_size)
+        })
+        .collect::<PyResult<_>>()?;
 
     Ok(indices)
 }
 
-/// 判断是否为纯整数索引（返回标量）
 fn is_all_int(indices: &[IndexDesc]) -> bool {
     indices.iter().all(|idx| matches!(idx, IndexDesc::Int(_)))
 }
 
-/// 判断是否包含花式索引（列表/ndarray）
 fn has_fancy(indices: &[IndexDesc]) -> bool {
-    indices.iter().any(|idx| matches!(idx, IndexDesc::Fancy(_)) || matches!(idx, IndexDesc::FancyMulti(_)))
+    indices.iter().any(|idx| matches!(idx, IndexDesc::Fancy(_) | IndexDesc::FancyMulti(_)))
 }
 
-/// 判断是否包含切片
 fn has_slice(indices: &[IndexDesc]) -> bool {
     indices.iter().any(|idx| matches!(idx, IndexDesc::Slice(_, _, _)))
 }
 
-/// 判断是否存在 ix_ 风格（来自多维 ndarray）
 fn has_fancy_multi(indices: &[IndexDesc]) -> bool {
     indices.iter().any(|idx| matches!(idx, IndexDesc::FancyMulti(_)))
 }
 
-/// 提取每个维度的索引列表（用于笛卡尔积或配对）
 fn build_dim_lists(indices: &[IndexDesc]) -> Vec<Vec<usize>> {
     indices.iter().map(|idx| match idx {
         IndexDesc::Fancy(v) | IndexDesc::FancyMulti(v) => v.clone(),
         IndexDesc::Slice(start, stop, step) => {
             if *step > 0 {
-                let mut v: Vec<usize> = Vec::new();
-                let mut i = *start;
-                while i < *stop {
-                    v.push(i as usize);
-                    i += *step;
-                }
-                v
+                (*start..*stop).step_by(*step as usize).map(|i| i as usize).collect()
             } else if *step < 0 {
-                let mut v: Vec<usize> = Vec::new();
-                let mut i = *start;
-                while i > *stop {
-                    v.push(i as usize);
-                    i += *step;
-                }
-                v
+                (*start..*stop).rev().step_by((-*step) as usize).map(|i| i as usize).collect()
             } else {
                 vec![]
             }
@@ -187,54 +149,70 @@ fn build_dim_lists(indices: &[IndexDesc]) -> Vec<Vec<usize>> {
     }).collect()
 }
 
-/// 纯花式索引：逐元素配对（如 x[[0,1,2], [0,1,0]]）
 fn fancy_pairwise(a: &Array<f64, IxDyn>, dim_lists: &[Vec<usize>]) -> Array<f64, IxDyn> {
     let n = dim_lists[0].len();
-    let mut result_vals: Vec<f64> = Vec::new();
-    for i in 0..n {
-        let mut cur = a.clone();
-        for d in 0..dim_lists.len() {
-            let idx = dim_lists[d][i];
-            cur = cur.index_axis(ndarray::Axis(0), idx).to_owned().into_dyn();
-        }
-        result_vals.push(*cur.first().unwrap_or(&0.0));
-    }
+    let strides = compute_strides(a.shape());
+    
+    let result_vals: Vec<f64> = (0..n).into_par_iter()
+        .map(|i| {
+            let mut flat_idx = 0;
+            for (d, dl) in dim_lists.iter().enumerate() {
+                flat_idx += dl[i] * strides[d];
+            }
+            a.as_slice_memory_order().unwrap()[flat_idx]
+        })
+        .collect();
+    
     Array::from_shape_vec(IxDyn(&[n]), result_vals)
         .unwrap_or_else(|_| Array::from_elem(IxDyn(&[0]), 0.0))
 }
 
-/// 笛卡尔积花式索引
-fn fancy_cartesian(a: &Array<f64, IxDyn>, dim_lists: &[Vec<usize>]) -> Vec<f64> {
-    let mut result_vals: Vec<f64> = Vec::new();
-
-    fn recurse(a: &Array<f64, IxDyn>, dim_lists: &[Vec<usize>], depth: usize,
-               coords: &[usize], result_vals: &mut Vec<f64>) {
-        if depth == dim_lists.len() {
-            let mut cur = a.clone();
-            for &c in coords {
-                cur = cur.index_axis(ndarray::Axis(0), c).to_owned().into_dyn();
-            }
-            result_vals.push(*cur.first().unwrap_or(&0.0));
-            return;
-        }
-        for &val in &dim_lists[depth] {
-            let mut new_coords = coords.to_vec();
-            new_coords.push(val);
-            recurse(a, dim_lists, depth + 1, &new_coords, result_vals);
-        }
+fn compute_strides(shape: &[usize]) -> Vec<usize> {
+    let mut strides = vec![1; shape.len()];
+    for i in (0..shape.len() - 1).rev() {
+        strides[i] = strides[i + 1] * shape[i + 1];
     }
-
-    recurse(a, dim_lists, 0, &[], &mut result_vals);
-    result_vals
+    strides
 }
 
-/// 对纯 slice+int 混合索引进行切片
+fn fancy_cartesian(a: &Array<f64, IxDyn>, dim_lists: &[Vec<usize>]) -> Vec<f64> {
+    let strides = compute_strides(a.shape());
+    let data = a.as_slice_memory_order().unwrap();
+    
+    let mut indices: Vec<usize> = vec![0; dim_lists.len()];
+    let total_result: usize = dim_lists.iter().map(|dl| dl.len()).product();
+    let mut result = Vec::with_capacity(total_result);
+    
+    loop {
+        let mut flat_idx = 0;
+        for (i, &idx) in indices.iter().enumerate() {
+            flat_idx += dim_lists[i][idx] * strides[i];
+        }
+        result.push(data[flat_idx]);
+        
+        let mut i = dim_lists.len() as isize - 1;
+        while i >= 0 {
+            indices[i as usize] += 1;
+            if indices[i as usize] < dim_lists[i as usize].len() {
+                break;
+            }
+            indices[i as usize] = 0;
+            i -= 1;
+        }
+        if i < 0 {
+            break;
+        }
+    }
+    
+    result
+}
+
 fn slice_and_int_index(a: &Array<f64, IxDyn>, indices: &[IndexDesc]) -> PyResult<Array<f64, IxDyn>> {
     let mut cur = a.clone();
     for (dim, idx) in indices.iter().enumerate().rev() {
         match idx {
             IndexDesc::Slice(start, stop, step) => {
-                let s = ndarray::Slice { start: *start, end: Some(*stop), step: *step };
+                let s = Slice { start: *start, end: Some(*stop), step: *step };
                 let dim_axis = ndarray::Axis(dim);
                 cur = cur.slice_axis(dim_axis, s).into_owned().into_dyn();
             }
@@ -253,21 +231,10 @@ fn slice_and_int_index(a: &Array<f64, IxDyn>, indices: &[IndexDesc]) -> PyResult
     Ok(cur)
 }
 
-/// 主索引函数：处理所有索引类型
-///
-/// Python 调用: _core.getitem_multi(a, key_tuple, shape)
-/// - a: NdArray 对象
-/// - key_tuple: Python 元组（Ellipsis 已在 Python 侧展开）
-/// - shape: 数组形状
 #[pyfunction]
-pub fn getitem_multi(
-    a: &NdArray,
-    key: &Bound<'_, PyAny>,
-    shape: Vec<usize>,
-) -> PyResult<NdArray> {
+pub fn getitem_multi(a: &NdArray, key: &Bound<'_, PyAny>, shape: Vec<usize>) -> PyResult<NdArray> {
     let indices = parse_indices(key, &shape)?;
 
-    // 填充缺失维度：如果索引数少于形状维度，补充完整切片
     let mut filled_indices = indices;
     let ndim = shape.len();
     while filled_indices.len() < ndim {
@@ -275,18 +242,21 @@ pub fn getitem_multi(
         filled_indices.push(IndexDesc::Slice(0, dim_size, 1));
     }
 
-    // 情况 1: 纯整数索引 → 标量
     if is_all_int(&filled_indices) {
-        let mut cur = a.data.clone();
-        for idx in &filled_indices {
-            if let IndexDesc::Int(i) = idx {
-                cur = cur.index_axis(ndarray::Axis(0), *i).to_owned().into_dyn();
-            }
-        }
-        return Ok(NdArray { data: cur });
+        let strides = compute_strides(&shape);
+        let data = a.data.as_slice_memory_order().unwrap();
+        
+        let flat_idx: usize = filled_indices.iter()
+            .enumerate()
+            .map(|(i, idx)| {
+                if let IndexDesc::Int(v) = idx { v * strides[i] } else { 0 }
+            })
+            .sum();
+        
+        let val = data[flat_idx];
+        return Ok(NdArray { data: Array::from_elem(IxDyn(&[]), val) });
     }
 
-    // 情况 2: 无花式索引（纯 slice + 整数混合）
     let has_fancy_flag = has_fancy(&filled_indices);
     let has_slice_flag = has_slice(&filled_indices);
 
@@ -295,12 +265,10 @@ pub fn getitem_multi(
         return Ok(NdArray { data: result });
     }
 
-    // 有花式索引
     let dim_lists = build_dim_lists(&filled_indices);
     let ix_style = has_fancy_multi(&filled_indices);
 
     if !has_slice_flag && !ix_style {
-        // 纯花式索引
         if dim_lists.len() > 1 && dim_lists[1..].iter().all(|dl| dl.len() == dim_lists[0].len()) {
             let result_vals = fancy_pairwise(&a.data, &dim_lists);
             Ok(NdArray { data: result_vals })
@@ -312,7 +280,6 @@ pub fn getitem_multi(
             Ok(NdArray { data: arr })
         }
     } else {
-        // 混合索引（slice + fancy）：笛卡尔积
         let result_vals = fancy_cartesian(&a.data, &dim_lists);
         let out_shape: Vec<usize> = dim_lists.iter().map(|dl| dl.len()).collect();
         let arr = Array::from_shape_vec(IxDyn(&out_shape), result_vals)
@@ -321,43 +288,28 @@ pub fn getitem_multi(
     }
 }
 
-/// 获取元素（供标量索引用）
 #[pyfunction]
 pub fn getitem_scalar(a: &NdArray, indices: Vec<isize>) -> PyResult<f64> {
-    let mut cur = a.data.clone();
-    for &idx in &indices {
-        let dim = cur.shape()[0] as isize;
+    let strides = compute_strides(a.data.shape());
+    let data = a.data.as_slice_memory_order().unwrap();
+    
+    let mut flat_idx = 0;
+    for (i, &idx) in indices.iter().enumerate() {
+        let dim = a.data.shape()[i] as isize;
         let actual = if idx < 0 { dim + idx } else { idx };
         if actual < 0 || actual >= dim {
             return Err(PyIndexError::new_err("Index out of bounds"));
         }
-        cur = cur.index_axis(ndarray::Axis(0), actual as usize).to_owned().into_dyn();
+        flat_idx += actual as usize * strides[i];
     }
-    Ok(*cur.first().unwrap_or(&0.0))
+    
+    Ok(data[flat_idx])
 }
 
-/// 计算每个轴上的步幅（相邻元素在扁平数组中的偏移）
-fn compute_strides(shape: &[usize]) -> Vec<usize> {
-    let mut strides = vec![1; shape.len()];
-    for i in (0..shape.len() - 1).rev() {
-        strides[i] = strides[i + 1] * shape[i + 1];
-    }
-    strides
-}
-
-/// 设置元素值：根据索引元组将值赋到指定位置
-///
-/// Python 调用: _core.setitem_multi(a, key_tuple, shape, value)
 #[pyfunction]
-pub fn setitem_multi(
-    a: &Bound<'_, NdArray>,
-    key: &Bound<'_, PyAny>,
-    shape: Vec<usize>,
-    value: &Bound<'_, PyAny>,
-) -> PyResult<()> {
+pub fn setitem_multi(a: &Bound<'_, NdArray>, key: &Bound<'_, PyAny>, shape: Vec<usize>, value: &Bound<'_, PyAny>) -> PyResult<()> {
     let indices = parse_indices(key, &shape)?;
 
-    // 填充缺失维度
     let mut filled_indices = indices;
     let ndim = shape.len();
     while filled_indices.len() < ndim {
@@ -365,13 +317,9 @@ pub fn setitem_multi(
         filled_indices.push(IndexDesc::Slice(0, dim_size, 1));
     }
 
-    // 构建每个维度的索引列表
     let dim_lists = build_dim_lists(&filled_indices);
-
-    // 计算步幅
     let strides = compute_strides(&shape);
 
-    // 获取值 - 转换为 f64
     let val: f64 = if let Ok(v) = value.extract::<f64>() {
         v
     } else if let Ok(v) = value.extract::<i32>() {
@@ -382,54 +330,47 @@ pub fn setitem_multi(
         return Err(PyTypeError::new_err("Unsupported value type for assignment"));
     };
 
-    // 生成所有索引组合的笛卡尔积，并写入值
-    fn assign_recursive(
-        strides: &[usize],
-        dim_lists: &[Vec<usize>],
-        depth: usize,
-        coords: &[usize],
-        data: &mut [f64],
-        val: f64,
-    ) {
-        if depth == dim_lists.len() {
-            let mut flat_idx = 0;
-            for (i, &c) in coords.iter().enumerate() {
-                flat_idx += c * strides[i];
-            }
-            if flat_idx < data.len() {
-                data[flat_idx] = val;
-            }
-            return;
+    let mut a_borrow = a.borrow_mut();
+    let data = a_borrow.data.as_slice_memory_order_mut().unwrap();
+    
+    let mut indices = vec![0; dim_lists.len()];
+    
+    loop {
+        let mut flat_idx = 0;
+        for (i, &idx) in indices.iter().enumerate() {
+            flat_idx += dim_lists[i][idx] * strides[i];
         }
-        for &val_idx in &dim_lists[depth] {
-            let mut new_coords = coords.to_vec();
-            new_coords.push(val_idx);
-            assign_recursive(strides, dim_lists, depth + 1, &new_coords, data, val);
+        if flat_idx < data.len() {
+            data[flat_idx] = val;
+        }
+        
+        let mut i = dim_lists.len() as isize - 1;
+        while i >= 0 {
+            indices[i as usize] += 1;
+            if indices[i as usize] < dim_lists[i as usize].len() {
+                break;
+            }
+            indices[i as usize] = 0;
+            i -= 1;
+        }
+        if i < 0 {
+            break;
         }
     }
-
-    let mut a_borrow = a.borrow_mut();
-    let flat_data = a_borrow.data.as_slice_memory_order_mut().unwrap();
-    assign_recursive(&strides, &dim_lists, 0, &[], flat_data, val);
 
     Ok(())
 }
 
-/// 检测复数数组的虚部，返回布尔掩码
 #[pyfunction]
 pub fn iscomplex_cpx(data: Vec<Py<PyAny>>, py: Python<'_>) -> PyResult<NdArray> {
-    let mut mask = Vec::with_capacity(data.len());
-    for item in &data {
-        let obj = item.bind(py);
-        // 提取实部和虚部
-        // let real: f64 = obj.getattr("real")?.extract()?;
-        let imag: f64 = obj.getattr("imag")?.extract()?;
-        if imag.abs() > 1e-12 {
-            mask.push(1.0);
-        } else {
-            mask.push(0.0);
-        }
-    }
+    let mask: Vec<f64> = data.iter()
+        .map(|item| {
+            let obj = item.bind(py);
+            let imag: f64 = obj.getattr("imag").unwrap().extract().unwrap();
+            if imag.abs() > 1e-12 { 1.0 } else { 0.0 }
+        })
+        .collect();
+    
     let arr = Array::from_shape_vec(IxDyn(&[data.len()]), mask)
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(NdArray { data: arr })

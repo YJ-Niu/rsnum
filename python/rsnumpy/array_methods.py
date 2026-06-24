@@ -20,45 +20,22 @@ class NdArrayMethods:
     
     @staticmethod
     def astype(arr, dtype):
-        """
-        将数组转换为指定的数据类型。
-
-        参数:
-            dtype: 目标数据类型。
-
-        返回:
-            ndarray: 转换后的数组。
-        """
+        """将数组转换为指定的数据类型。"""
         return _wrap_result(arr._array.astype(dtype))
     
     @staticmethod
     def reshape(arr, *shape):
-        """
-        改变数组形状而不改变数据。
-
-        参数:
-            *shape: 新的形状，可以是元组或多个参数。-1 表示自动计算该维度。
-
-        返回:
-            ndarray: 重新塑形后的数组。
-        """
+        """改变数组形状而不改变数据。"""
         if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
             shape = shape[0]
         else:
             shape = shape
-        
-        # Rust 端处理 -1 和形状验证
         result = arr._array.reshape(shape)
         return ndarray._wrap(result, _dtype=getattr(arr, '_dtype', "float64"), _fields=getattr(arr, '_fields', None), _raw_data=getattr(arr, '_raw_data', None))
     
     @staticmethod
     def resize(arr, new_shape):
-        """
-        改变数组形状和大小。
-
-        参数:
-            new_shape: 新的形状（int, tuple 或 list）。
-        """
+        """改变数组形状和大小。"""
         if isinstance(new_shape, int):
             new_shape = (new_shape,)
         elif isinstance(new_shape, list):
@@ -67,62 +44,21 @@ class NdArrayMethods:
     
     @staticmethod
     def ravel(arr, order='C'):
-        """
-        将数组展平为一维。
-
-        参数:
-            order: 'C'（行优先）、'F'（列优先）、'A'（原顺序）、'K'（内存顺序）
-
-        返回:
-            ndarray: 展平后的数组。
-        """
+        """将数组展平为一维。"""
         if order == 'A' or order == 'K':
             order = 'C'
         return NdArrayMethods.flatten(arr, order)
     
     @staticmethod
     def flatten(arr, order='C'):
-        """
-        展平数组为一维。
-
-        参数:
-            order: 'C'（行优先）、'F'（列优先）、'A'（原顺序）、'K'（内存顺序）
-
-        返回:
-            ndarray: 展平后的数组副本。
-        """
+        """展平数组为一维。"""
         dtype = getattr(arr, '_dtype', "float64")
-        if order == 'F' and arr.ndim > 1:
-            # F-order: 按列序收集元素
-            shape = list(arr.shape)
-            ndim = len(shape)
-            strides = [1] * ndim
-            for i in range(ndim - 2, -1, -1):
-                strides[i] = strides[i + 1] * shape[i + 1]
-            flat_c = arr._array.flatten().tolist()
-            flat_f = []
-
-            def _walk(dim, pos):
-                if dim < 0:
-                    flat_f.append(flat_c[pos])
-                else:
-                    for v in range(shape[dim]):
-                        _walk(dim - 1, pos + v * strides[dim])
-            _walk(ndim - 1, 0)
-            return _wrap_result(_core.ndarray(flat_f).reshape([-1]), dtype)
-        return _wrap_result(arr._array.flatten(), dtype)
+        result = _core.flatten_full(arr._array, order)
+        return _wrap_result(result, dtype)
     
     @staticmethod
     def transpose(arr, *axes):
-        """
-        转置数组。
-
-        参数:
-            *axes: 轴的顺序。
-
-        返回:
-            ndarray: 转置后的数组。
-        """
+        """转置数组。"""
         dtype = getattr(arr, '_dtype', "float64")
         fields = getattr(arr, '_fields', None)
         raw = getattr(arr, '_raw_data', None)
@@ -134,16 +70,7 @@ class NdArrayMethods:
     
     @staticmethod
     def swapaxes(arr, axis1, axis2):
-        """
-        交换两个轴的位置。
-
-        参数:
-            axis1: 第一个轴。
-            axis2: 第二个轴。
-
-        返回:
-            ndarray: 交换轴后的数组。
-        """
+        """交换两个轴的位置。"""
         dtype = getattr(arr, '_dtype', "float64")
         fields = getattr(arr, '_fields', None)
         raw_data = getattr(arr, '_raw_data', None)
@@ -152,28 +79,12 @@ class NdArrayMethods:
     
     @staticmethod
     def squeeze(arr, axis=None):
-        """
-        移除长度为1的轴。
-
-        参数:
-            axis: 可选，指定要移除的轴。
-
-        返回:
-            ndarray: 压缩后的数组。
-        """
+        """移除长度为1的轴。"""
         return _wrap_result(arr._array.squeeze())
     
     @staticmethod
     def max(arr, axis=None):
-        """
-        返回数组的最大值。
-
-        参数:
-            axis: 计算最大值的轴。
-
-        返回:
-            标量或 ndarray: 最大值。
-        """
+        """返回数组的最大值。"""
         result = arr._array.max(axis)
         if axis is None and hasattr(result, 'tolist'):
             return result.tolist()
@@ -181,15 +92,7 @@ class NdArrayMethods:
     
     @staticmethod
     def min(arr, axis=None):
-        """
-        返回数组的最小值。
-
-        参数:
-            axis: 计算最小值的轴。
-
-        返回:
-            标量或 ndarray: 最小值。
-        """
+        """返回数组的最小值。"""
         result = arr._array.min(axis)
         if axis is None and hasattr(result, 'tolist'):
             return result.tolist()
@@ -197,15 +100,7 @@ class NdArrayMethods:
     
     @staticmethod
     def mean(arr, axis=None):
-        """
-        计算数组的平均值。
-
-        参数:
-            axis: 计算平均值的轴。
-
-        返回:
-            标量或 ndarray: 平均值。
-        """
+        """计算数组的平均值。"""
         result = arr._array.mean(axis)
         if axis is None and hasattr(result, 'tolist'):
             return result.tolist()
@@ -213,15 +108,7 @@ class NdArrayMethods:
     
     @staticmethod
     def std(arr, axis=None):
-        """
-        计算数组的标准差。
-
-        参数:
-            axis: 计算标准差的轴。
-
-        返回:
-            标量或 ndarray: 标准差。
-        """
+        """计算数组的标准差。"""
         result = arr._array.std(axis)
         if axis is None and hasattr(result, 'tolist'):
             return result.tolist()
@@ -229,15 +116,7 @@ class NdArrayMethods:
     
     @staticmethod
     def var(arr, axis=None):
-        """
-        计算数组的方差。
-
-        参数:
-            axis: 计算方差的轴。
-
-        返回:
-            标量或 ndarray: 方差。
-        """
+        """计算数组的方差。"""
         result = arr._array.var(axis)
         if axis is None and hasattr(result, 'tolist'):
             return result.tolist()
@@ -245,15 +124,7 @@ class NdArrayMethods:
     
     @staticmethod
     def sum(arr, axis=None):
-        """
-        计算数组元素的和。
-
-        参数:
-            axis: 求和的轴。
-
-        返回:
-            标量或 ndarray: 和。
-        """
+        """计算数组元素的和。"""
         result = arr._array.sum(axis)
         if axis is None and hasattr(result, 'tolist'):
             return result.tolist()
@@ -261,15 +132,7 @@ class NdArrayMethods:
     
     @staticmethod
     def prod(arr, axis=None):
-        """
-        计算数组元素的乘积。
-
-        参数:
-            axis: 求乘积的轴。
-
-        返回:
-            标量或 ndarray: 乘积。
-        """
+        """计算数组元素的乘积。"""
         result = arr._array.prod(axis)
         if axis is None and hasattr(result, 'tolist'):
             return result.tolist()
@@ -277,80 +140,35 @@ class NdArrayMethods:
     
     @staticmethod
     def cumsum(arr, axis=None):
-        """
-        计算累积和。
-
-        参数:
-            axis: 计算累积和的轴。
-
-        返回:
-            ndarray: 累积和数组。
-        """
+        """计算累积和。"""
         result = arr._array.cumsum(axis)
         return _wrap_result(result)
     
     @staticmethod
     def cumprod(arr, axis=None):
-        """
-        计算累积乘积。
-
-        参数:
-            axis: 计算累积乘积的轴。
-
-        返回:
-            ndarray: 累积乘积数组。
-        """
+        """计算累积乘积。"""
         result = arr._array.cumprod(axis)
         return _wrap_result(result)
     
     @staticmethod
     def argmax(arr, axis=None):
-        """
-        返回最大值的索引。
-
-        参数:
-            axis: 查找最大值的轴。
-
-        返回:
-            标量或 ndarray: 索引。
-        """
+        """返回最大值的索引。"""
         return _wrap_result(_core.argmax_axis(arr._array, axis))
     
     @staticmethod
     def argmin(arr, axis=None):
-        """
-        返回最小值的索引。
-
-        参数:
-            axis: 查找最小值的轴。
-
-        返回:
-            标量或 ndarray: 索引。
-        """
+        """返回最小值的索引。"""
         return _wrap_result(_core.argmin_axis(arr._array, axis))
     
     @staticmethod
     def argsort(arr, axis=-1):
-        """
-        返回排序后的索引。
-
-        参数:
-            axis: 排序的轴。
-
-        返回:
-            ndarray: 索引数组。
-        """
+        """返回排序后的索引。"""
         result = arr._array.argsort(axis)
         return _wrap_result(result)
     
     @staticmethod
     def sort(arr, axis=-1):
-        """
-        原地排序数组。
-
-        参数:
-            axis: 排序的轴。
-        """
+        """原地排序数组。"""
         result = arr._array.sort(axis)
         if hasattr(result, 'shape') and result.shape == arr.shape:
             arr._array = result
@@ -359,116 +177,49 @@ class NdArrayMethods:
     
     @staticmethod
     def diagonal(arr, offset=0, axis1=0, axis2=1):
-        """
-        返回数组的对角线元素。
-
-        参数:
-            offset: 对角线偏移量。
-            axis1: 第一个轴。
-            axis2: 第二个轴。
-
-        返回:
-            ndarray: 对角线元素。
-        """
+        """返回数组的对角线元素。"""
         result = arr._array.diagonal(offset, axis1, axis2)
         return _wrap_result(result)
     
     @staticmethod
     def trace(arr, offset=0, axis1=0, axis2=1):
-        """
-        计算数组的迹（对角线元素之和）。
-
-        参数:
-            offset: 对角线偏移量。
-            axis1: 第一个轴。
-            axis2: 第二个轴。
-
-        返回:
-            标量: 迹。
-        """
+        """计算数组的迹（对角线元素之和）。"""
         return arr._array.trace(offset, axis1, axis2)
     
     @staticmethod
     def fill(arr, value):
-        """
-        用指定值填充数组。
-
-        参数:
-            value: 填充值。
-        """
+        """用指定值填充数组。"""
         arr._array.fill(value)
     
     @staticmethod
     def item(arr, *args):
-        """
-        获取数组的单个元素。
-
-        参数:
-            *args: 索引。
-
-        返回:
-            标量: 元素值。
-        """
+        """获取数组的单个元素。"""
         return arr._array.item(*args)
     
     @staticmethod
     def tolist(arr):
-        """
-        将数组转换为 Python 列表。
-
-        返回:
-            list: Python 列表表示。
-        """
+        """将数组转换为 Python 列表。"""
         return arr._array.tolist()
     
     @staticmethod
     def take(arr, indices, axis=None):
-        """
-        根据索引获取元素。
-
-        参数:
-            indices: 索引数组。
-            axis: 获取元素的轴。
-
-        返回:
-            ndarray: 选取的元素。
-        """
+        """根据索引获取元素。"""
         result = arr._array.take(_ensure(indices), axis)
         return _wrap_result(result)
     
     @staticmethod
     def put(arr, indices, values):
-        """
-        将值放入数组的指定位置。
-
-        参数:
-            indices: 索引数组。
-            values: 要放入的值。
-        """
+        """将值放入数组的指定位置。"""
         arr._array.put(_ensure(indices), _ensure(values))
     
     @staticmethod
     def repeat(arr, repeats, axis=None):
-        """
-        重复数组元素。
-
-        参数:
-            repeats: 重复次数。
-            axis: 重复的轴。
-
-        返回:
-            ndarray: 重复后的数组。
-        """
+        """重复数组元素。"""
         result = arr._array.repeat(repeats, axis)
         return _wrap_result(result)
     
     @staticmethod
     def nonzero(arr):
-        """
-        返回非零元素的索引。
-
-        返回:
-            tuple: 非零元素的索引元组。
-        """
+        """返回非零元素的索引。"""
         raw = _core.nonzero_arrs(arr._array)
         return tuple(ndarray._wrap(r) for r in raw)
