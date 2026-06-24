@@ -1,7 +1,8 @@
+use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyFloat, PyList, PyTuple};
-use pyo3::exceptions::PyTypeError;
-use rustfft::{FftPlanner, num_complex::Complex};
+use rustfft::{FftPlanner, num_complex::Complex as FftComplex};
+
 use crate::NdArray;
 
 fn fft_1d(a: &[f64]) -> Vec<(f64, f64)> {
@@ -13,7 +14,7 @@ fn fft_1d(a: &[f64]) -> Vec<(f64, f64)> {
     let mut planner = FftPlanner::new();
     let fft = planner.plan_fft_forward(n);
     
-    let mut buffer: Vec<Complex<f64>> = a.iter().map(|&x| Complex::new(x, 0.0)).collect();
+    let mut buffer: Vec<FftComplex<f64>> = a.iter().map(|&x| FftComplex::new(x, 0.0)).collect();
     fft.process(&mut buffer);
     
     buffer.into_iter().map(|c| (c.re, c.im)).collect()
@@ -28,7 +29,7 @@ fn ifft_1d(a: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let mut planner = FftPlanner::new();
     let ifft = planner.plan_fft_inverse(n);
     
-    let mut buffer: Vec<Complex<f64>> = a.iter().map(|&(re, im)| Complex::new(re, im)).collect();
+    let mut buffer: Vec<FftComplex<f64>> = a.iter().map(|&(re, im)| FftComplex::new(re, im)).collect();
     ifft.process(&mut buffer);
     
     let scale = 1.0 / n as f64;
@@ -44,7 +45,7 @@ fn rfft_1d(a: &[f64]) -> Vec<(f64, f64)> {
     let mut planner = FftPlanner::new();
     let fft = planner.plan_fft_forward(n);
     
-    let mut buffer: Vec<Complex<f64>> = a.iter().map(|&x| Complex::new(x, 0.0)).collect();
+    let mut buffer: Vec<FftComplex<f64>> = a.iter().map(|&x| FftComplex::new(x, 0.0)).collect();
     fft.process(&mut buffer);
     
     let output_len = n / 2 + 1;
@@ -59,19 +60,19 @@ fn irfft_1d(a: &[(f64, f64)], n: Option<usize>) -> Vec<f64> {
     
     let output_len = n.unwrap_or_else(|| (input_len - 1) * 2);
     
-    let mut full_spectrum: Vec<Complex<f64>> = Vec::with_capacity(output_len);
+    let mut full_spectrum: Vec<FftComplex<f64>> = Vec::with_capacity(output_len);
     
     for i in 0..output_len {
         if i < input_len {
             let &(re, im) = &a[i];
-            full_spectrum.push(Complex::new(re, im));
+            full_spectrum.push(FftComplex::new(re, im));
         } else {
             let mirror_idx = output_len - i;
             if mirror_idx < input_len {
                 let &(re, im) = &a[mirror_idx];
-                full_spectrum.push(Complex::new(re, -im));
+                full_spectrum.push(FftComplex::new(re, -im));
             } else {
-                full_spectrum.push(Complex::new(0.0, 0.0));
+                full_spectrum.push(FftComplex::new(0.0, 0.0));
             }
         }
     }
@@ -87,7 +88,7 @@ fn irfft_1d(a: &[(f64, f64)], n: Option<usize>) -> Vec<f64> {
 }
 
 #[pyfunction]
-pub fn py_fft<'py>(py: Python<'py>, a: &Bound<'_, PyAny>) -> PyResult<Bound<'py, PyList>> {
+pub fn py_fft<'py>(py: Python<'py>, a: &Bound<'_, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let mut vec: Vec<f64> = Vec::new();
     if let Ok(list) = a.cast::<PyList>() {
         for item in list.iter() {
@@ -102,16 +103,16 @@ pub fn py_fft<'py>(py: Python<'py>, a: &Bound<'_, PyAny>) -> PyResult<Bound<'py,
     let result = fft_1d(&vec);
     let py_list = PyList::empty(py);
     for (re, im) in result {
-        let re_py = pyo3::IntoPyObject::into_pyobject(re, py)?;
-        let im_py = pyo3::IntoPyObject::into_pyobject(im, py)?;
-        let tuple = PyTuple::new(py, &[re_py.into_any(), im_py.into_any()])?;
+        let re_py = PyFloat::new(py, re).into_any();
+        let im_py = PyFloat::new(py, im).into_any();
+        let tuple = PyTuple::new(py, &[re_py, im_py])?;
         py_list.append(tuple)?;
     }
-    Ok(py_list)
+    Ok(py_list.into_any())
 }
 
 #[pyfunction]
-pub fn py_ifft<'py>(py: Python<'py>, a: &Bound<'_, PyAny>) -> PyResult<Bound<'py, PyList>> {
+pub fn py_ifft<'py>(py: Python<'py>, a: &Bound<'_, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let mut vec: Vec<(f64, f64)> = Vec::new();
     if let Ok(list) = a.cast::<PyList>() {
         for item in list.iter() {
@@ -130,16 +131,16 @@ pub fn py_ifft<'py>(py: Python<'py>, a: &Bound<'_, PyAny>) -> PyResult<Bound<'py
     let result = ifft_1d(&vec);
     let py_list = PyList::empty(py);
     for (re, im) in result {
-        let re_py = pyo3::IntoPyObject::into_pyobject(re, py)?;
-        let im_py = pyo3::IntoPyObject::into_pyobject(im, py)?;
-        let tuple = PyTuple::new(py, &[re_py.into_any(), im_py.into_any()])?;
+        let re_py = PyFloat::new(py, re).into_any();
+        let im_py = PyFloat::new(py, im).into_any();
+        let tuple = PyTuple::new(py, &[re_py, im_py])?;
         py_list.append(tuple)?;
     }
-    Ok(py_list)
+    Ok(py_list.into_any())
 }
 
 #[pyfunction]
-pub fn py_rfft<'py>(py: Python<'py>, a: &Bound<'_, PyAny>) -> PyResult<Bound<'py, PyList>> {
+pub fn py_rfft<'py>(py: Python<'py>, a: &Bound<'_, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let mut vec: Vec<f64> = Vec::new();
     if let Ok(list) = a.cast::<PyList>() {
         for item in list.iter() {
@@ -154,16 +155,16 @@ pub fn py_rfft<'py>(py: Python<'py>, a: &Bound<'_, PyAny>) -> PyResult<Bound<'py
     let result = rfft_1d(&vec);
     let py_list = PyList::empty(py);
     for (re, im) in result {
-        let re_py = pyo3::IntoPyObject::into_pyobject(re, py)?;
-        let im_py = pyo3::IntoPyObject::into_pyobject(im, py)?;
-        let tuple = PyTuple::new(py, &[re_py.into_any(), im_py.into_any()])?;
+        let re_py = PyFloat::new(py, re).into_any();
+        let im_py = PyFloat::new(py, im).into_any();
+        let tuple = PyTuple::new(py, &[re_py, im_py])?;
         py_list.append(tuple)?;
     }
-    Ok(py_list)
+    Ok(py_list.into_any())
 }
 
 #[pyfunction]
-pub fn py_irfft<'py>(py: Python<'py>, a: &Bound<'_, PyAny>, n: Option<usize>) -> PyResult<Bound<'py, PyList>> {
+pub fn py_irfft<'py>(py: Python<'py>, a: &Bound<'_, PyAny>, n: Option<usize>) -> PyResult<Bound<'py, PyAny>> {
     let mut vec: Vec<(f64, f64)> = Vec::new();
     if let Ok(list) = a.cast::<PyList>() {
         for item in list.iter() {
@@ -182,31 +183,28 @@ pub fn py_irfft<'py>(py: Python<'py>, a: &Bound<'_, PyAny>, n: Option<usize>) ->
     let result = irfft_1d(&vec, n);
     let py_list = PyList::empty(py);
     for val in result {
-        py_list.append(val)?;
+        py_list.append(PyFloat::new(py, val))?;
     }
-    Ok(py_list)
+    Ok(py_list.into_any())
 }
 
-// ===== NdArray 版本：直接从 NdArray 取数据，避免 Python 层 .tolist() 循环 =====
-
 #[pyfunction]
-pub fn py_fft_ndarray<'py>(py: Python<'py>, a: &NdArray) -> PyResult<Bound<'py, PyList>> {
+pub fn py_fft_ndarray<'py>(py: Python<'py>, a: &NdArray) -> PyResult<Bound<'py, PyAny>> {
     let vec: Vec<f64> = a.data.iter().copied().collect();
     let result = fft_1d(&vec);
     let py_list = PyList::empty(py);
     for (re, im) in result {
         let re_py = PyFloat::new(py, re).into_any();
         let im_py = PyFloat::new(py, im).into_any();
-        let tuple = PyTuple::new(py, &[re_py, im_py]).map_err(|e| -> PyErr { e.into() })?;
-        py_list.append(tuple).map_err(|e| -> PyErr { e.into() })?;
+        let tuple = PyTuple::new(py, &[re_py, im_py])?;
+        py_list.append(tuple)?;
     }
-    Ok(py_list)
+    Ok(py_list.into_any())
 }
 
 #[pyfunction]
-pub fn py_ifft_ndarray<'py>(py: Python<'py>, a: &NdArray) -> PyResult<Bound<'py, PyList>> {
+pub fn py_ifft_ndarray<'py>(py: Python<'py>, a: &NdArray) -> PyResult<Bound<'py, PyAny>> {
     let flat_data: Vec<f64> = a.data.iter().copied().collect();
-    // NdArray 存储为交错格式 (real0, imag0, real1, imag1, ...)
     let mut vec = Vec::with_capacity(flat_data.len() / 2);
     for chunk in flat_data.chunks(2) {
         if chunk.len() == 2 {
@@ -218,28 +216,28 @@ pub fn py_ifft_ndarray<'py>(py: Python<'py>, a: &NdArray) -> PyResult<Bound<'py,
     for (re, im) in result {
         let re_py = PyFloat::new(py, re).into_any();
         let im_py = PyFloat::new(py, im).into_any();
-        let tuple = PyTuple::new(py, &[re_py, im_py]).map_err(|e| -> PyErr { e.into() })?;
-        py_list.append(tuple).map_err(|e| -> PyErr { e.into() })?;
+        let tuple = PyTuple::new(py, &[re_py, im_py])?;
+        py_list.append(tuple)?;
     }
-    Ok(py_list)
+    Ok(py_list.into_any())
 }
 
 #[pyfunction]
-pub fn py_rfft_ndarray<'py>(py: Python<'py>, a: &NdArray) -> PyResult<Bound<'py, PyList>> {
+pub fn py_rfft_ndarray<'py>(py: Python<'py>, a: &NdArray) -> PyResult<Bound<'py, PyAny>> {
     let vec: Vec<f64> = a.data.iter().copied().collect();
     let result = rfft_1d(&vec);
     let py_list = PyList::empty(py);
     for (re, im) in result {
         let re_py = PyFloat::new(py, re).into_any();
         let im_py = PyFloat::new(py, im).into_any();
-        let tuple = PyTuple::new(py, &[re_py, im_py]).map_err(|e| -> PyErr { e.into() })?;
-        py_list.append(tuple).map_err(|e| -> PyErr { e.into() })?;
+        let tuple = PyTuple::new(py, &[re_py, im_py])?;
+        py_list.append(tuple)?;
     }
-    Ok(py_list)
+    Ok(py_list.into_any())
 }
 
 #[pyfunction]
-pub fn py_irfft_ndarray<'py>(py: Python<'py>, a: &NdArray, n: Option<usize>) -> PyResult<Bound<'py, PyList>> {
+pub fn py_irfft_ndarray<'py>(py: Python<'py>, a: &NdArray, n: Option<usize>) -> PyResult<Bound<'py, PyAny>> {
     let flat_data: Vec<f64> = a.data.iter().copied().collect();
     let mut vec = Vec::with_capacity(flat_data.len() / 2);
     for chunk in flat_data.chunks(2) {
@@ -250,7 +248,7 @@ pub fn py_irfft_ndarray<'py>(py: Python<'py>, a: &NdArray, n: Option<usize>) -> 
     let result = irfft_1d(&vec, n);
     let py_list = PyList::empty(py);
     for val in result {
-        py_list.append(PyFloat::new(py, val)).map_err(|e| -> PyErr { e.into() })?;
+        py_list.append(PyFloat::new(py, val))?;
     }
-    Ok(py_list)
+    Ok(py_list.into_any())
 }

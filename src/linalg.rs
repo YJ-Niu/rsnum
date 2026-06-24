@@ -1,6 +1,7 @@
 use ndarray::{Array, IxDyn};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use rayon::prelude::*;
 
 use crate::NdArray;
 
@@ -36,15 +37,17 @@ fn dot(a: &NdArray, b: &NdArray) -> PyResult<NdArray> {
         let n = a_shape[1];
         let p = b_shape[1];
         let mut result = vec![0.0_f64; m * p];
-        for i in 0..m {
+        
+        result.par_chunks_mut(p).enumerate().for_each(|(i, row)| {
             for j in 0..p {
                 let mut sum = 0.0;
                 for k in 0..n {
                     sum += a_data[[i, k]] * b_data[[k, j]];
                 }
-                result[i * p + j] = sum;
+                row[j] = sum;
             }
-        }
+        });
+        
         let arr = Array::from_shape_vec((m, p), result)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         return Ok(NdArray {

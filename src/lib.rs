@@ -3,6 +3,7 @@ use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyFloat, PyList, PySlice, PyTuple};
 use rayon::prelude::*;
+use std::fmt::Write;
 
 mod linalg;
 mod random;
@@ -4927,11 +4928,11 @@ fn format_int_array_inner(arr: &Array<f64, IxDyn>, pad_width: usize) -> String {
         let mut s = String::from("[");
         for (i, val) in arr.iter().enumerate() {
             if i > 0 {
-                s.push_str(" ");
+                s.push(' ');
             }
             let val_str = format_int_scalar(*val);
             if pad_width > 0 {
-                s.push_str(&format!("{:>width$}", val_str, width = pad_width));
+                let _ = write!(s, "{:>pad_width$}", val_str);
             } else {
                 s.push_str(&val_str);
             }
@@ -4949,7 +4950,7 @@ fn format_int_array_inner(arr: &Array<f64, IxDyn>, pad_width: usize) -> String {
         let row_str = format_int_array_inner(&sub, pad_width);
         s.push_str(&row_str);
     }
-    s.push_str("]");
+    s.push(']');
     s
 }
 
@@ -4968,7 +4969,7 @@ fn format_int_array(arr: &Array<f64, IxDyn>) -> String {
 #[pyfunction]
 fn _format_int_repr(arr: &NdArray) -> String {
     let inner = format_int_array(&arr.data);
-    format!("rsnumpy.ndarray({}) dtype=int64", inner)
+    format!("rsnumpy.ndarray({inner}) dtype=int64")
 }
 
 #[pyfunction]
@@ -4986,9 +4987,10 @@ fn binary_repr(num: i64, width: Option<usize>) -> String {
     };
     
     if num >= 0 {
-        format!("{:0width$b}", num, width = w)
+        format!("{num:0w$b}")
     } else {
-        format!("{:0width$b}", (1 << w) + num, width = w)
+        let val = (1 << w) + num;
+        format!("{val:0w$b}")
     }
 }
 
@@ -5009,11 +5011,11 @@ fn format_float_array_inner(arr: &Array<f64, IxDyn>, pad_width: usize) -> String
         let mut s = String::from("[");
         for (i, val) in arr.iter().enumerate() {
             if i > 0 {
-                s.push_str(" ");
+                s.push(' ');
             }
             let val_str = format_float_scalar(*val);
             if pad_width > 0 {
-                s.push_str(&format!("{:>width$}", val_str, width = pad_width));
+                let _ = write!(s, "{:>pad_width$}", val_str);
             } else {
                 s.push_str(&val_str);
             }
@@ -5031,7 +5033,7 @@ fn format_float_array_inner(arr: &Array<f64, IxDyn>, pad_width: usize) -> String
         let row_str = format_float_array_inner(&sub, pad_width);
         s.push_str(&row_str);
     }
-    s.push_str("]");
+    s.push(']');
     s
 }
 
@@ -5047,7 +5049,7 @@ fn format_float_array(arr: &Array<f64, IxDyn>) -> String {
 #[pyfunction]
 fn _format_float_repr(arr: &NdArray) -> String {
     let inner = format_float_array(&arr.data);
-    format!("rsnumpy.ndarray({}) dtype=float64", inner)
+    format!("rsnumpy.ndarray({inner}) dtype=float64")
 }
 
 #[pyfunction]
@@ -5055,11 +5057,10 @@ fn _format_float_str(arr: &NdArray) -> String {
     format_float_array(&arr.data)
 }
 
-// int64 值显示：使用 format_scalar（整数值不显示小数点，如 0 1 2）
 #[pyfunction]
 fn _format_int_val_repr(arr: &NdArray) -> String {
     let inner = format_array_repr(&arr.data, "");
-    format!("rsnumpy.ndarray({}) dtype=int64", inner)
+    format!("rsnumpy.ndarray({inner}) dtype=int64")
 }
 
 #[pyfunction]
@@ -5067,13 +5068,7 @@ fn _format_int_val_str(arr: &NdArray) -> String {
     format_array_repr(&arr.data, "")
 }
 
-// ===== Module Initialization =====
-
-#[pymodule]
-fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<NdArray>()?;
-    m.add_class::<NdArrayIter>()?;
-
+fn init_array_creation(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(array, m)?)?;
     m.add_function(wrap_pyfunction!(zeros, m)?)?;
     m.add_function(wrap_pyfunction!(ones, m)?)?;
@@ -5086,7 +5081,10 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(ones_like, m)?)?;
     m.add_function(wrap_pyfunction!(empty_like, m)?)?;
     m.add_function(wrap_pyfunction!(full_like, m)?)?;
+    Ok(())
+}
 
+fn init_math_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sin, m)?)?;
     m.add_function(wrap_pyfunction!(cos, m)?)?;
     m.add_function(wrap_pyfunction!(tan, m)?)?;
@@ -5122,7 +5120,10 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(hypot, m)?)?;
     m.add_function(wrap_pyfunction!(sinc, m)?)?;
     m.add_function(wrap_pyfunction!(heaviside, m)?)?;
+    Ok(())
+}
 
+fn init_statistics_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sum, m)?)?;
     m.add_function(wrap_pyfunction!(mean, m)?)?;
     m.add_function(wrap_pyfunction!(std_dev, m)?)?;
@@ -5131,12 +5132,25 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(max, m)?)?;
     m.add_function(wrap_pyfunction!(argmin, m)?)?;
     m.add_function(wrap_pyfunction!(argmax, m)?)?;
+    Ok(())
+}
 
+fn init_array_manipulation(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(concatenate, m)?)?;
     m.add_function(wrap_pyfunction!(stack, m)?)?;
     m.add_function(wrap_pyfunction!(transpose, m)?)?;
     m.add_function(wrap_pyfunction!(swapaxes, m)?)?;
+    m.add_function(wrap_pyfunction!(vstack, m)?)?;
+    m.add_function(wrap_pyfunction!(hstack, m)?)?;
+    m.add_function(wrap_pyfunction!(tile, m)?)?;
+    m.add_function(wrap_pyfunction!(squeeze, m)?)?;
+    m.add_function(wrap_pyfunction!(flatten, m)?)?;
+    m.add_function(wrap_pyfunction!(flatten_full, m)?)?;
+    m.add_function(wrap_pyfunction!(reshape, m)?)?;
+    Ok(())
+}
 
+fn init_misc_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(where_, m)?)?;
     m.add_function(wrap_pyfunction!(clip, m)?)?;
     m.add_function(wrap_pyfunction!(unique, m)?)?;
@@ -5167,7 +5181,24 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(select_rs, m)?)?;
     m.add_function(wrap_pyfunction!(ix_rs, m)?)?;
     m.add_function(wrap_pyfunction!(_arange_arrays, m)?)?;
+    m.add_function(wrap_pyfunction!(expand_dims, m)?)?;
+    m.add_function(wrap_pyfunction!(column_stack, m)?)?;
+    m.add_function(wrap_pyfunction!(roll, m)?)?;
+    m.add_function(wrap_pyfunction!(rot90, m)?)?;
+    m.add_function(wrap_pyfunction!(flatnonzero, m)?)?;
+    m.add_function(wrap_pyfunction!(ptp, m)?)?;
+    m.add_function(wrap_pyfunction!(digitize, m)?)?;
+    m.add_function(wrap_pyfunction!(broadcast_to, m)?)?;
+    m.add_function(wrap_pyfunction!(searchsorted, m)?)?;
+    m.add_function(wrap_pyfunction!(flip, m)?)?;
+    m.add_function(wrap_pyfunction!(split_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(cov, m)?)?;
+    m.add_function(wrap_pyfunction!(histogram2d_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(corrcoef_rs, m)?)?;
+    Ok(())
+}
 
+fn init_bitwise_and_comparison(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(isnan, m)?)?;
     m.add_function(wrap_pyfunction!(isinf, m)?)?;
     m.add_function(wrap_pyfunction!(isfinite, m)?)?;
@@ -5184,15 +5215,10 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(array_equal, m)?)?;
     m.add_function(wrap_pyfunction!(argwhere, m)?)?;
     m.add_function(wrap_pyfunction!(count_nonzero, m)?)?;
+    Ok(())
+}
 
-    m.add_function(wrap_pyfunction!(vstack, m)?)?;
-    m.add_function(wrap_pyfunction!(hstack, m)?)?;
-    m.add_function(wrap_pyfunction!(tile, m)?)?;
-    m.add_function(wrap_pyfunction!(squeeze, m)?)?;
-    m.add_function(wrap_pyfunction!(flatten, m)?)?;
-    m.add_function(wrap_pyfunction!(flatten_full, m)?)?;
-    m.add_function(wrap_pyfunction!(reshape, m)?)?;
-
+fn init_arithmetic_operations(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(logspace, m)?)?;
     m.add_function(wrap_pyfunction!(geomspace, m)?)?;
     m.add_function(wrap_pyfunction!(add, m)?)?;
@@ -5211,57 +5237,49 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(logical_or, m)?)?;
     m.add_function(wrap_pyfunction!(logical_xor, m)?)?;
     m.add_function(wrap_pyfunction!(isclose, m)?)?;
-    m.add_function(wrap_pyfunction!(expand_dims, m)?)?;
-    m.add_function(wrap_pyfunction!(column_stack, m)?)?;
-    m.add_function(wrap_pyfunction!(roll, m)?)?;
-    m.add_function(wrap_pyfunction!(rot90, m)?)?;
-    m.add_function(wrap_pyfunction!(flatnonzero, m)?)?;
-    m.add_function(wrap_pyfunction!(ptp, m)?)?;
-    m.add_function(wrap_pyfunction!(digitize, m)?)?;
-    m.add_function(wrap_pyfunction!(broadcast_to, m)?)?;
-    m.add_function(wrap_pyfunction!(searchsorted, m)?)?;
-    m.add_function(wrap_pyfunction!(flip, m)?)?;
-    m.add_function(wrap_pyfunction!(split_rs, m)?)?;
-    m.add_function(wrap_pyfunction!(cov, m)?)?;
-    m.add_function(wrap_pyfunction!(histogram2d_rs, m)?)?;
-    m.add_function(wrap_pyfunction!(corrcoef_rs, m)?)?;
-    m.add_function(wrap_pyfunction!(polyval_rs, m)?)?;
-    m.add_function(wrap_pyfunction!(polyder_rs, m)?)?;
-    m.add_function(wrap_pyfunction!(polyint_rs, m)?)?;
-    m.add_function(wrap_pyfunction!(polyroots_rs, m)?)?;
-    m.add_function(wrap_pyfunction!(polyfit_rs, m)?)?;
+    Ok(())
+}
+
+fn init_io_and_poly(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(save_npy, m)?)?;
     m.add_function(wrap_pyfunction!(load_npy, m)?)?;
     m.add_function(wrap_pyfunction!(save_text, m)?)?;
     m.add_function(wrap_pyfunction!(load_text, m)?)?;
     m.add_function(wrap_pyfunction!(bytes_to_floats, m)?)?;
+    m.add_function(wrap_pyfunction!(savez_npz, m)?)?;
+    m.add_function(wrap_pyfunction!(load_npz, m)?)?;
+    m.add_function(wrap_pyfunction!(polyval_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(polyder_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(polyint_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(polyroots_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(polyfit_rs, m)?)?;
+    m.add_function(wrap_pyfunction!(polyadd, m)?)?;
+    m.add_function(wrap_pyfunction!(polysub, m)?)?;
+    m.add_function(wrap_pyfunction!(polymul, m)?)?;
+    Ok(())
+}
 
+fn init_indexing_and_format(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(tuple_getitem, m)?)?;
     m.add_function(wrap_pyfunction!(indexing::getitem_multi, m)?)?;
     m.add_function(wrap_pyfunction!(indexing::getitem_scalar, m)?)?;
     m.add_function(wrap_pyfunction!(indexing::setitem_multi, m)?)?;
     m.add_function(wrap_pyfunction!(indexing::iscomplex_cpx, m)?)?;
-    m.add_function(wrap_pyfunction!(savez_npz, m)?)?;
-    m.add_function(wrap_pyfunction!(load_npz, m)?)?;
-    m.add_function(wrap_pyfunction!(polyadd, m)?)?;
-    m.add_function(wrap_pyfunction!(polysub, m)?)?;
-    m.add_function(wrap_pyfunction!(polymul, m)?)?;
     m.add_function(wrap_pyfunction!(argmax_axis, m)?)?;
     m.add_function(wrap_pyfunction!(argmin_axis, m)?)?;
     m.add_function(wrap_pyfunction!(binary_repr, m)?)?;
-
     m.add_function(wrap_pyfunction!(_format_complex_repr, m)?)?;
     m.add_function(wrap_pyfunction!(_format_complex_str, m)?)?;
-
     m.add_function(wrap_pyfunction!(_format_int_repr, m)?)?;
     m.add_function(wrap_pyfunction!(_format_int_str, m)?)?;
-
     m.add_function(wrap_pyfunction!(_format_float_repr, m)?)?;
     m.add_function(wrap_pyfunction!(_format_float_str, m)?)?;
-
     m.add_function(wrap_pyfunction!(_format_int_val_repr, m)?)?;
     m.add_function(wrap_pyfunction!(_format_int_val_str, m)?)?;
+    Ok(())
+}
 
+fn init_fft(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fft::py_fft, m)?)?;
     m.add_function(wrap_pyfunction!(fft::py_ifft, m)?)?;
     m.add_function(wrap_pyfunction!(fft::py_rfft, m)?)?;
@@ -5270,6 +5288,24 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fft::py_ifft_ndarray, m)?)?;
     m.add_function(wrap_pyfunction!(fft::py_rfft_ndarray, m)?)?;
     m.add_function(wrap_pyfunction!(fft::py_irfft_ndarray, m)?)?;
+    Ok(())
+}
+
+#[pymodule]
+fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<NdArray>()?;
+    m.add_class::<NdArrayIter>()?;
+
+    init_array_creation(m)?;
+    init_math_functions(m)?;
+    init_statistics_functions(m)?;
+    init_array_manipulation(m)?;
+    init_misc_functions(m)?;
+    init_bitwise_and_comparison(m)?;
+    init_arithmetic_operations(m)?;
+    init_io_and_poly(m)?;
+    init_indexing_and_format(m)?;
+    init_fft(m)?;
 
     let random_module = PyModule::new(m.py(), "random")?;
     random::init_module(&random_module)?;

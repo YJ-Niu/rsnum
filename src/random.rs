@@ -4,6 +4,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 use rand::SeedableRng;
 use rand_distr::Distribution;
+use rayon::prelude::*;
 
 use crate::NdArray;
 use std::sync::Mutex;
@@ -68,14 +69,32 @@ fn parse_size_arg(size: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<usize>> {
     }
 }
 
-fn make_ndarray(rng: &mut impl rand::Rng, shape: &[usize], dist: impl rand_distr::Distribution<f64>) -> PyResult<NdArray> {
+fn make_ndarray(rng: &mut impl rand::Rng, shape: &[usize], dist: impl rand_distr::Distribution<f64> + Sync + Send + Clone) -> PyResult<NdArray> {
     if shape.is_empty() {
         return Ok(NdArray {
             data: Array::from_elem(IxDyn(&[]), dist.sample(rng)),
         });
     }
     let total: usize = shape.iter().product();
-    let values: Vec<f64> = (0..total).map(|_| dist.sample(rng)).collect();
+    
+    let mut values = Vec::with_capacity(total);
+    values.resize(total, 0.0);
+    
+    let num_chunks = rayon::current_num_threads();
+    let chunk_size = (total + num_chunks - 1) / num_chunks;
+    
+    let mut seeds: Vec<u64> = Vec::with_capacity(num_chunks);
+    for _ in 0..num_chunks {
+        seeds.push(rand::random());
+    }
+    
+    values.par_chunks_mut(chunk_size).enumerate().for_each(|(i, chunk)| {
+        let mut local_rng = ::rand::rngs::StdRng::seed_from_u64(seeds[i]);
+        for elem in chunk {
+            *elem = dist.sample(&mut local_rng);
+        }
+    });
+    
     let arr = Array::from_shape_vec(IxDyn(shape), values)
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(NdArray { data: arr })
